@@ -47,7 +47,7 @@
     "updater": {
       "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDBBNkUwRTlEMTgxQjY1N0YKUldSL1pSc1luUTV1Q2c4eEM2V0NocDNJTFJ0Z05LVHFvcEFYK2FGeGVsSHdDT09BbmJFdzQ4em4K",
       "endpoints": [
-        "https://github.com/XSamuraiCoder/TIde/releases/download/latest/latest.json"
+        "https://github.com/XSamuraiCoder/TIde/releases/latest/download/latest.json"
       ],
       "windows": {
         "installMode": "passive"

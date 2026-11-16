@@ -57,9 +57,9 @@ Press F1 on an entry to open its page, and Esc to close the page.
 
 ## Updates
 
-The desktop app checks the `latest` release when it starts. If there is a newer build it offers the update, with the release notes from [RELEASE_NOTES.md](RELEASE_NOTES.md); click the version in the status bar to check at any time. Edit `RELEASE_NOTES.md` before pushing to change what the next release says. The portable exe and the zipped `.app` don't update themselves.
+The desktop app checks the newest stable release (the latest `v` tag's) when it starts. If there is a newer build it offers the update, with the release notes from [RELEASE_NOTES.md](RELEASE_NOTES.md); click the version in the status bar to check at any time. Edit `RELEASE_NOTES.md` before pushing to change what the next release says. The portable exe and the zipped `.app` don't update themselves.
 
-Releases use the version in `src-tauri/tauri.conf.json` (also set it in `package.json` and `Cargo.toml`); installed apps are offered an update only when it goes up, so bump it to ship one. Update files are signed. The workflow needs the signing key as the `TAURI_SIGNING_PRIVATE_KEY` repository secret (and `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` if the key has one). The public key is in `tauri.conf.json`.
+Every push to `main` refreshes the rolling `latest` prerelease, with installers to try but no `latest.json`, so installed apps don't update to it. Pushing a version tag (`git tag v1.5.0 && git push origin v1.5.0`) builds that version as a stable release with `latest.json`, and installed apps update to it. Releases use the version in `src-tauri/tauri.conf.json`, and the tag must match it (also set it in `package.json` and `Cargo.toml`); installed apps are offered an update only when it goes up, so bump it to ship one. Update files are signed. The workflow needs the signing key as the `TAURI_SIGNING_PRIVATE_KEY` repository secret (and `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` if the key has one). The public key is in `tauri.conf.json`.
 
 ## Files and settings
 

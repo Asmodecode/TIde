@@ -1,4 +1,4 @@
-// Auto-update: checks the "latest" GitHub release (latest.json, written by the build workflow),
+// Auto-update: checks the newest stable (tagged) GitHub release (its latest.json, written by the build workflow),
 // shows its Markdown release notes, and installs and restarts on request. Desktop builds only.
 import { check, type Update } from "@tauri-apps/plugin-updater";
 import { relaunch } from "@tauri-apps/plugin-process";

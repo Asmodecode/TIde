@@ -1,8 +1,13 @@
 name: Build
 
+# Two kinds of release:
+# - every push to main refreshes the rolling "latest" prerelease (installers only, no latest.json);
+# - a version tag (v1.5.0) builds that version as a stable release, with latest.json, which installed
+#   apps read to update. The app checks releases/latest/download/latest.json: the newest stable release.
 on:
   push:
     branches: [main]
+    tags: ["v*"]
   workflow_dispatch:
 
 permissions:
@@ -14,11 +19,13 @@ concurrency:
 
 jobs:
   prepare:
-    name: Prepare latest release
+    name: Prepare release
     runs-on: ubuntu-latest
     outputs:
       started: ${{ steps.start.outputs.started }}
       version: ${{ steps.start.outputs.version }}
+      release: ${{ steps.start.outputs.release }}
+      stable: ${{ steps.start.outputs.stable }}
 
     steps:
       - uses: actions/checkout@v4
@@ -32,13 +39,31 @@ jobs:
         run: |
           set -euo pipefail
           echo "started=$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$GITHUB_OUTPUT"
-          # The release is the version in tauri.conf.json. Installed apps update when it goes up.
-          echo "version=$(jq -r .version src-tauri/tauri.conf.json)" >> "$GITHUB_OUTPUT"
-          if ! gh release view latest --repo "$REPO" >/dev/null 2>&1; then
-            gh release create latest --repo "$REPO" \
-              --title "Latest Build" \
-              --notes "Latest automated build from commit $SHA" \
-              --target "$SHA" --prerelease
+          # The version is the one in tauri.conf.json. Installed apps update when it goes up.
+          version="$(jq -r .version src-tauri/tauri.conf.json)"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          if [[ "$GITHUB_REF" == refs/tags/v* ]]; then
+            tag="${GITHUB_REF#refs/tags/}"
+            if [ "$tag" != "v$version" ]; then
+              echo "::error::The tag $tag doesn't match the version in tauri.conf.json ($version)."
+              exit 1
+            fi
+            echo "release=$tag" >> "$GITHUB_OUTPUT"
+            echo "stable=true" >> "$GITHUB_OUTPUT"
+            # A draft until every platform has built, so nobody gets half a release.
+            if ! gh release view "$tag" --repo "$REPO" >/dev/null 2>&1; then
+              gh release create "$tag" --repo "$REPO" --verify-tag --draft \
+                --title "TIde $tag" --notes "Building TIde $version…"
+            fi
+          else
+            echo "release=latest" >> "$GITHUB_OUTPUT"
+            echo "stable=false" >> "$GITHUB_OUTPUT"
+            if ! gh release view latest --repo "$REPO" >/dev/null 2>&1; then
+              gh release create latest --repo "$REPO" \
+                --title "Latest Build" \
+                --notes "Latest automated build from commit $SHA" \
+                --target "$SHA" --prerelease
+            fi
           fi
 
   build:
@@ -122,11 +147,12 @@ jobs:
         with:
           args: ${{ matrix.args }} --config src-tauri/tauri.ci.conf.json
 
-      - name: Upload installers to the latest release
+      - name: Upload installers to the release
         shell: bash   # the default on Windows is PowerShell
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           REPO: ${{ github.repository }}
+          RELEASE: ${{ needs.prepare.outputs.release }}
           TARGET: ${{ matrix.target }}
           VERSION: ${{ needs.prepare.outputs.version }}
         run: |
@@ -170,10 +196,10 @@ jobs:
             exit 1
           fi
           printf 'Uploading: %s\n' "${files[@]}"
-          gh release upload latest "${files[@]}" --repo "$REPO" --clobber
+          gh release upload "$RELEASE" "${files[@]}" --repo "$REPO" --clobber
 
   finish:
-    name: Finish latest release
+    name: Finish release
     # Runs only if every platform built, so a failed build keeps that platform's old installers.
     needs: [prepare, build]
     runs-on: ubuntu-latest
@@ -183,7 +209,8 @@ jobs:
         with:
           fetch-depth: 0   # need the history to move the "latest" tag safely
 
-      - name: Move the tag, refresh the release, clear stale assets
+      - name: Rolling build - move the tag, refresh the prerelease, clear stale assets
+        if: needs.prepare.outputs.stable != 'true'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           REPO: ${{ github.repository }}
@@ -197,13 +224,37 @@ jobs:
           git tag -f latest "$SHA"
           git push -f origin refs/tags/latest
 
+          printf '%s\n\n---\nTIde %s, built from commit %s. A rolling build of main: installed apps update from tagged releases, not this one.\n' \
+            "$(cat RELEASE_NOTES.md)" "$VERSION" "$SHA" > body.md
+          gh release edit latest --repo "$REPO" --title "TIde v$VERSION (latest build)" --notes-file body.md --prerelease
+
+          # Anything not uploaded by this run is left over from an older build, latest.json included:
+          # only tagged releases have one.
+          gh release view latest --repo "$REPO" --json assets \
+            | jq -r --arg started "$STARTED" '.assets[] | select(.updatedAt < $started or .name == "latest.json") | .name' \
+            | while IFS= read -r asset; do
+                [ -z "$asset" ] && continue
+                echo "Removing stale asset: $asset"
+                gh release delete-asset latest "$asset" --repo "$REPO" --yes
+              done
+
+      - name: Tagged release - notes, latest.json, publish
+        if: needs.prepare.outputs.stable == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+          SHA: ${{ github.sha }}
+          VERSION: ${{ needs.prepare.outputs.version }}
+          RELEASE: ${{ needs.prepare.outputs.release }}
+        run: |
+          set -euo pipefail
           # The release text is RELEASE_NOTES.md, which the app also shows when it offers the update.
           printf '%s\n\n---\nTIde %s, built from commit %s.\n' "$(cat RELEASE_NOTES.md)" "$VERSION" "$SHA" > body.md
-          gh release edit latest --repo "$REPO" --title "TIde v$VERSION" --notes-file body.md --prerelease
 
-          # latest.json tells installed apps about this version: one signed download per platform.
+          # latest.json tells installed apps about this version: one signed download per platform,
+          # from this release.
           mkdir -p sigs
-          gh release download latest --repo "$REPO" --pattern "*_${VERSION}_*.sig" --dir sigs
+          gh release download "$RELEASE" --repo "$REPO" --pattern "*_${VERSION}_*.sig" --dir sigs
           node -e '
             const fs = require("fs");
             const kinds = [[/_x64-setup\.exe\.sig$/, "windows-x86_64"], [/_aarch64\.app\.tar\.gz\.sig$/, "darwin-aarch64"],
@@ -214,20 +265,12 @@ jobs:
               if (!kind) continue;
               platforms[kind[1]] = {
                 signature: fs.readFileSync("sigs/" + file, "utf8").trim(),
-                url: `https://github.com/${process.env.REPO}/releases/download/latest/${file.slice(0, -4)}`,
+                url: `https://github.com/${process.env.REPO}/releases/download/${process.env.RELEASE}/${file.slice(0, -4)}`,
               };
             }
             if (Object.keys(platforms).length < kinds.length) console.log("::warning::latest.json covers only " + Object.keys(platforms).join(", "));
             const notes = fs.readFileSync("RELEASE_NOTES.md", "utf8").trim();
             fs.writeFileSync("latest.json", JSON.stringify({ version: process.env.VERSION, notes, pub_date: new Date().toISOString(), platforms }, null, 2));
           '
-          gh release upload latest latest.json --repo "$REPO" --clobber
-
-          # Anything not uploaded by this run is left over from an older build.
-          gh release view latest --repo "$REPO" --json assets \
-            | jq -r --arg started "$STARTED" '.assets[] | select(.updatedAt < $started) | .name' \
-            | while IFS= read -r asset; do
-                [ -z "$asset" ] && continue
-                echo "Removing stale asset: $asset"
-                gh release delete-asset latest "$asset" --repo "$REPO" --yes
-              done
+          gh release upload "$RELEASE" latest.json --repo "$REPO" --clobber
+          gh release edit "$RELEASE" --repo "$REPO" --title "TIde $RELEASE" --notes-file body.md --draft=false --latest
