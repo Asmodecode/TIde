@@ -370,3 +370,37 @@ body { font: 13px/1.4 var(--ui); background: var(--body); color: var(--ink); ove
 .ext-actions button { font: inherit; font-size: 12px; color: var(--ink); background: var(--body); border: 1px solid var(--rule); border-radius: 2px; padding: 2px 10px; cursor: pointer; }
 .ext-actions button:hover { border-color: var(--key); }
 .ext.off .ext-actions { opacity: 1; }
+
+/* The panel under the editor: Output and Terminal */
+.panel { position: relative; display: flex; flex-direction: column; flex: none; min-height: 90px; border-top: 1px solid var(--rule); background: var(--panel); }
+.panel[hidden] { display: none; }
+.panel-resize { position: absolute; left: 0; right: 0; top: -3px; height: 6px; cursor: ns-resize; z-index: 2; }
+.panel-resize:hover { background: color-mix(in srgb, var(--key) 40%, transparent); }
+.panel-head { display: flex; align-items: center; gap: 2px; padding: 0 8px 0 10px; height: 32px; flex: none; }
+.panel-head [role="tab"] { font: 11px var(--ui); letter-spacing: .04em; text-transform: uppercase; color: var(--muted); background: none; border: 0; border-bottom: 1px solid transparent; padding: 8px 8px 6px; cursor: pointer; }
+.panel-head [role="tab"]:hover { color: var(--ink); }
+.panel-head [role="tab"][aria-selected="true"] { color: var(--ink); border-bottom-color: var(--key); }
+.panel-spacer { flex: 1; }
+.panel-icon { font: 12px var(--ui); color: var(--muted); background: none; border: 1px solid transparent; border-radius: 3px; padding: 2px 8px; cursor: pointer; }
+.panel-icon:hover { color: var(--ink); border-color: var(--rule); }
+.panel-icon[hidden] { display: none; }
+#panel-stop { color: var(--danger); }
+#panel-close { font-size: 16px; line-height: 1; }
+.panel-body { flex: 1; min-height: 0; display: flex; }
+.panel-pane { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+.panel-pane[hidden] { display: none; }
+.log { flex: 1; min-height: 0; overflow: auto; padding: 4px 12px 8px; font: 12.5px/1.45 var(--mono); color: var(--ink); background: var(--paper); user-select: text; }
+.log-line { white-space: pre-wrap; word-break: break-all; min-height: 1.45em; }
+.log .cmd { color: var(--key); }
+.log .ok { color: #86d9a8; }
+.log .err { color: var(--danger); }
+.log .info { color: var(--muted); }
+.log .input { color: var(--warn); }
+.term-line { display: flex; align-items: center; gap: 8px; padding: 4px 12px 6px; background: var(--paper); border-top: 1px solid var(--rule); font: 12.5px var(--mono); }
+.term-prompt { color: var(--key); white-space: nowrap; }
+.term-input { flex: 1; min-width: 0; font: inherit; color: var(--ink); background: none; border: 0; outline: none; }
+
+/* The status bar's Terminal and Output buttons */
+.status .status-panel { display: inline-flex; align-items: center; gap: 4px; }
+.status .status-panel svg { width: 14px; height: 14px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+.status .status-panel[aria-pressed="true"] { background: rgba(255, 255, 255, .2); }

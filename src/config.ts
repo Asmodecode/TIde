@@ -61,10 +61,10 @@ export const CONFIG_SCHEMA = {
   properties: {
     calculator: { enum: ["ce", "plus"], description: "The calculator this project is for: \"ce\" for the TI-84 Plus CE, \"plus\" for the TI-84 Plus. Sets TI-BASIC's screen checks and commands." },
     program: { type: "string", description: "The program ▶ Run starts, without prgm, such as \"MYGAME\". Leave it out to start the first .8xp sent, or set \"\" to only send." },
-    build: { type: "string", description: "The command line Build (Ctrl+E) runs, and Run runs first, in the project folder. Without it, a folder with a Makefile runs make.", examples: ["make", "make debug", "make V=1"] },
-    prerun: { ...STEPS, description: `Steps ▶ Run takes after building and before sending: command lines run in the project folder, and calculator macros. If a step fails, nothing is sent. ${MACRO_HELP}`,
+    build: { type: "string", description: "The command line Build (Ctrl+E) runs, and Run runs first, in the project folder, in the system shell (cmd on Windows, sh elsewhere), so && and pipes work. Without it, a folder with a Makefile runs make. Its full log is in the Output panel.", examples: ["make", "make debug", "make V=1"] },
+    prerun: { ...STEPS, description: `Steps ▶ Run takes after building and before sending: shell command lines run in the project folder (with &&, pipes, redirects and variables, as in a terminal), and calculator macros. If a step fails, nothing is sent. ${MACRO_HELP}`,
       examples: ["make gfx", ["python tools/pack.py", "app.open(AsmHook2)", "key.press(enter)"]] },
-    postrun: { ...STEPS, description: `Steps ▶ Run takes after starting the program, such as pressing keys in it. ${MACRO_HELP}`,
+    postrun: { ...STEPS, description: `Steps ▶ Run takes after starting the program: shell command lines and calculator macros, such as pressing keys in it. ${MACRO_HELP}`,
       examples: [["wait(1000)", "key.press(2nd)", "key.type(\"HELLO\")"]] },
     send: {
       type: "array", items: { type: "string" },
@@ -79,7 +79,7 @@ export const CONFIG_SCHEMA = {
     runIn: { enum: ["calculator", "cemu"], description: "Where ▶ Run goes: TIde's calculator, or the CEmu app.", default: "calculator" },
     scripts: {
       type: "object",
-      description: "Command lines you can run from Scripts in the status bar, by name. Their output goes to the Output tab.",
+      description: "Shell command lines you can run from Scripts in the status bar, by name, in the project folder. Their output streams to the Output panel.",
       additionalProperties: { type: "string" },
       examples: [{ clean: "make clean", debug: "make debug" }],
     },

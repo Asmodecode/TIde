@@ -90,7 +90,7 @@
               <span class="calc-name"><select id="calc-model" title="Which calculator to run. Each model needs a ROM from your own calculator." aria-label="Calculator model"></select> <span id="calc-state"></span></span>
               <button id="calc-send" type="button" title="Send programs, apps, appvars, groups, images or bundles to the calculator. You can also drop files here.">Send files…</button>
               <button id="calc-cemu" type="button" title="Build and run in the CEmu app instead">Open in CEmu</button>
-              <button id="calc-console-toggle" type="button" title="Show or hide the console">Console</button>
+              <button id="calc-console-toggle" type="button" title="The calculator's console, in the panel under the editor">Console</button>
               <button id="calc-reset" type="button" title="Reset the calculator">Reset</button>
               <button id="calc-reload" type="button" title="Turn the calculator off and boot it again from the ROM, with a fresh memory">Reload ROM</button>
               <button id="calc-close" type="button" title="Back to the editor (Esc on the bar)" aria-label="Close">×</button>
@@ -106,14 +106,6 @@
               <div class="calc-keypad" id="calc-keypad"></div>
             </div>
             <p class="hint calc-credit">Drop TI files here to send them. Emulation by <a id="calc-credit" href="https://github.com/CE-Programming/CEmu" target="_blank" rel="noreferrer">CEmu</a> (<span id="calc-license">GPLv3</span>).</p>
-            <div class="calc-console" id="calc-console">
-              <div class="calc-console-bar">
-                <span>Console</span>
-                <span class="hint">Emulator output, such as dbg_printf from C programs</span>
-                <button id="calc-console-clear" type="button">Clear</button>
-              </div>
-              <div class="calc-console-log" id="calc-console-log" role="log" aria-live="polite"></div>
-            </div>
             <div class="calc-drop" id="calc-drop" hidden>Drop to send to the calculator</div>
           </div>
           <div class="empty" id="empty">
@@ -122,12 +114,27 @@
             <span class="hint">Open a program from the Explorer, or type a name and press Enter.</span>
           </div>
         </div>
+        <div class="panel" id="panel" hidden>
+          <div class="panel-resize" id="panel-resize" title="Drag to resize"></div>
+          <div class="panel-head" role="tablist">
+            <button id="panel-tab-output" type="button" role="tab" title="Build, prerun, postrun and script logs (Ctrl+Shift+U)">Output</button>
+            <button id="panel-tab-terminal" type="button" role="tab" title="Command lines in the system shell (Ctrl+`)">Terminal</button>
+            <button id="panel-tab-console" type="button" role="tab" title="The calculator's console: dbg_printf from C programs and emulator messages">Console</button>
+            <span class="panel-spacer"></span>
+            <button id="panel-stop" type="button" class="panel-icon" title="Stop what's running" hidden>■ Stop</button>
+            <button id="panel-clear" type="button" class="panel-icon" title="Clear">Clear</button>
+            <button id="panel-close" type="button" class="panel-icon" title="Close the panel" aria-label="Close the panel">×</button>
+          </div>
+          <div class="panel-body" id="panel-body"></div>
+        </div>
       </section>
 
       <footer class="status" data-kind="tibasic">
         <span id="status-project"></span>
         <button id="status-branch" type="button" title="Source Control" hidden></button>
         <button id="problems" type="button" hidden>No problems</button>
+        <button id="status-terminal" type="button" class="status-panel" title="Terminal (Ctrl+`)" aria-pressed="false"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M7 9l3 3-3 3M12 15h5"/></svg>Terminal</button>
+        <button id="status-output" type="button" class="status-panel" title="Output: build and script logs (Ctrl+Shift+U)" aria-pressed="false"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 6h16M4 10h16M4 14h10M4 18h7"/></svg>Output</button>
         <span id="status-msg"></span>
         <button id="export" type="button" hidden>Build .8xp</button>
         <button id="run" type="button" title="Build and run in CEmu, the TI-84 Plus CE emulator (F5)" hidden>▶ Run</button>

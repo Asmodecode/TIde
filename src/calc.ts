@@ -192,8 +192,6 @@ export interface Calc {
   show(): Promise<void>;
   hide(): void;
   readonly visible: boolean;
-  /** Whether the console under the calculator is shown. */
-  consoleShown: boolean;
   /** Which kind of calculator is running, starting it if needed: null when it isn't set up. */
   family(): Promise<"ce" | "plus" | "other" | null>;
   /** Sends programs to the calculator and launches `launch` once they arrive. */
@@ -213,6 +211,8 @@ export function createCalc(opts: {
   pickFiles: () => Promise<string[]>;
   readFile: (path: string) => Promise<Uint8Array>;
   layout: () => void;
+  /** Gets every console line, for the Console tab in the panel under the editor. */
+  onLog?: (text: string, kind: "out" | "err" | "info" | "emu") => void;
 }): Calc {
   const ui = {
     panel: $("calc"),
@@ -230,36 +230,13 @@ export function createCalc(opts: {
     reset: $<HTMLButtonElement>("calc-reset"),
     reload: $<HTMLButtonElement>("calc-reload"),
     close: $<HTMLButtonElement>("calc-close"),
-    consoleToggle: $<HTMLButtonElement>("calc-console-toggle"),
-    console: $("calc-console"),
-    log: $("calc-console-log"),
-    consoleClear: $<HTMLButtonElement>("calc-console-clear"),
   };
 
-  // ── Console: the emulator's output (dbg_printf from C programs, emulator messages) and TIde's own steps ──
-  const CONSOLE_PREF = "tide-pref-calc-console"; // not "tide:", which the browser store treats as a program
-  function log(text: string, kind: "out" | "err" | "info" | "emu" = "out") {
-    const atEnd = ui.log.scrollTop + ui.log.clientHeight >= ui.log.scrollHeight - 4;
-    const line = document.createElement("div");
-    line.className = `line ${kind}`;
-    line.textContent = text;
-    ui.log.append(line);
-    while (ui.log.childElementCount > 2000) ui.log.firstElementChild!.remove();
-    if (atEnd) ui.log.scrollTop = ui.log.scrollHeight;
-  }
+  // ── Console: the emulator's output (dbg_printf from C programs, emulator messages) and TIde's own
+  // steps, shown in the Console tab of the panel under the editor ──
+  const log = (text: string, kind: "out" | "err" | "info" | "emu" = "out") => opts.onLog?.(text, kind);
   /** Status bar and console. */
   const say = (text: string) => { opts.say(text); log(text, "info"); };
-  function showConsole(on: boolean) {
-    ui.console.hidden = !on;
-    ui.consoleToggle.setAttribute("aria-pressed", String(on));
-    try { localStorage.setItem(CONSOLE_PREF, on ? "1" : "0"); } catch { /* storage unavailable */ }
-    if (on) ui.log.scrollTop = ui.log.scrollHeight;
-  }
-  let consoleOpen = true;
-  try { consoleOpen = localStorage.getItem(CONSOLE_PREF) !== "0"; } catch { /* storage unavailable */ }
-  showConsole(consoleOpen);
-  ui.consoleToggle.addEventListener("click", () => showConsole(ui.console.hidden !== false));
-  ui.consoleClear.addEventListener("click", () => ui.log.replaceChildren());
 
   let engine: Engine | null = null;
   let starting: Promise<boolean> | null = null;
@@ -756,8 +733,6 @@ export function createCalc(opts: {
 
   const view: Calc = {
     get visible() { return !ui.panel.hidden; },
-    get consoleShown() { return !ui.console.hidden; },
-    set consoleShown(on: boolean) { showConsole(on); },
     async show() {
       ui.panel.hidden = false;
       opts.layout();

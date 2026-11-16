@@ -1,9 +1,13 @@
-## TIde 1.4.0
+## TIde 1.5.0
 
-- **More calculators:** the calculator can now be a TI-73, 81, 82, 83, 83 Plus, 83 Plus SE, 84 Plus, 84 Plus SE, 85 or 86 as well as the TI-84 Plus CE, using Wabbitemu. Pick one in the model menu on the calculator bar, which also adds and removes ROMs. Run sends TI-BASIC to a TI-83 Plus or 84 Plus and starts it from the PRGM menu; the TI-85 and 86 get their own key labels.
-- **Emulators built in:** both emulators come with TIde, so the calculator needs nothing but a ROM from your own calculator.
-- **Extensions:** a new Extensions view (`Ctrl+Shift+X`). Extensions add snippets, completions, hover help, languages and commands, with an `extension.json` and optionally a `main.js`. **New extension** makes one from a template, and writing one has IntelliSense too. Turn extensions on and off, or uninstall them.
-- **.TIdeex files:** one file holds a whole extension. Export one from an extension's right-click menu; install one by double-clicking it, dropping it on TIde, or **Install from .TIdeex…**.
-- **CE Languages and Plus Languages:** TIde's language support is now two extensions. CE Languages has the TI-BASIC, C, eZ80 assembly and py2ez80 IntelliSense with new snippets for each. Plus Languages is new: z80 assembly for the TI-83 Plus and 84 Plus in `.z80` files, with `bcall` routines and addresses, and TI-BASIC snippets for the Plus.
-- **New icon:** the TIde waves on a navy background.
-- **License:** TIde is now free software under the GPL v3.
+- **Output, Terminal and Console:** a panel under the editor, opened from the new **Terminal** and **Output** buttons on the status bar (or ``Ctrl+` `` and `Ctrl+Shift+U`).
+  - **Output** shows the full log of every build, prerun, postrun and script as it runs, with colors, errors in red, the exit code and how long it took. **■ Stop** ends it.
+  - **Terminal** runs command lines in your system shell, starting in the open folder, with `cd`, history, input for running commands, and Stop (`Ctrl+C`).
+  - **Console** is the calculator's console (`dbg_printf` from C programs and emulator messages), moved here from under the calculator. The calculator bar's **Console** button opens it.
+- **Shell commands in .tide/tide.json:** `build`, `prerun`, `postrun` and `scripts` run in the system shell, so `&&`, pipes, redirects and variables work as in a terminal.
+- **IntelliSense from the catalogs:** problems show as you type, with quick fixes (Ctrl+.).
+  - **C:** a wrong number of arguments to a CE library function is an error, a missing `#include` gets a one-click fix, and a misspelled library function gets "did you mean". Signature help highlights the argument you're on, and hover says which header a function is in.
+  - **Assembly:** a misspelled instruction, directive or OS routine gets "did you mean"; F12 goes to a label.
+  - **py2ez80:** a `graphics.`, `math.` or `random.` name the module doesn't have, a module used without `import` (with a fix), and wrong argument counts.
+  - **Outline:** Ctrl+Shift+O lists a C file's functions, an assembly file's labels and a program's `Lbl`s.
+- **Live Explorer:** files that a build, the terminal or another program creates, changes or deletes show in the Explorer at once.

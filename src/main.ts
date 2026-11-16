@@ -25,6 +25,7 @@ import { make8xp, tokenize } from "./build";
 import { exportProgram } from "./export";
 import { EXTENSION_SCHEMA, EXTENSION_TYPES, emit, extensionCommands, extensionsFolder, loadExtensions, reloadExtensions, type BundledExtension, type ExtensionHost, type ExtensionManifest } from "./extensions";
 import { createExtensionsView } from "./extensions-view";
+import { createPanel } from "./panel";
 import { fs, normalizeName, store, type Entry } from "./store";
 
 (self as unknown as { MonacoEnvironment: object }).MonacoEnvironment = {
@@ -104,7 +105,12 @@ function h<K extends keyof HTMLElementTagNameMap>(
 
 const docsView = createDocs($("docs"), () => { if (activeDoc()) editor.focus(); });
 
+// The calculator's console lines also go to the Console tab under the editor. The calculator starts
+// before that panel exists, so its first lines wait here.
+const consoleBacklog: [string, "out" | "err" | "info" | "emu"][] = [];
+let toConsole = (text: string, kind: "out" | "err" | "info" | "emu") => { consoleBacklog.push([text, kind]); };
 const calc = createCalc({
+  onLog: (text, kind) => toConsole(text, kind),
   say: text => setMessage(text),
   pickRom: () => fs.pickFile("TI-84 Plus CE ROM", ["rom"]),
   pickFiles: () => fs.pickFiles("TI files", SEND_TYPES),
@@ -409,30 +415,36 @@ async function tiFileView(entry: Entry, bytes: Uint8Array): Promise<View> {
   return view;
 }
 
-// ── Output tab: build and script output ──
-const outputLog = h("pre", { className: "output-log" });
-const outputView: View = {
-  id: "output", label: "Output",
-  el: h("div", { className: "output-view" },
-    h("div", { className: "title-row" }, h("h1", {}, "Output"),
-      h("button", { type: "button", onclick: () => outputLog.replaceChildren() }, "Clear")),
-    outputLog),
-};
-function output(text: string, kind: "cmd" | "ok" | "err" | "" = "") {
-  const atEnd = outputLog.scrollTop + outputLog.clientHeight >= outputLog.scrollHeight - 4;
-  outputLog.append(h("span", { className: kind }, text.endsWith("\n") ? text : `${text}\n`));
-  if (atEnd) outputLog.scrollTop = outputLog.scrollHeight;
-}
-const openOutput = () => openView(outputView, "Opened Output");
+// ── The panel under the editor: Output (build, prerun, postrun and script logs) and Terminal ──
+const panel = createPanel({
+  available: fs.available,
+  runShell: (dir, line, onOutput) => fs.runShell(dir, line, onOutput),
+  homeDir: () => fs.homeDir(),
+  projectRoot: () => project?.root ?? null,
+  say: setMessage,
+  layout: () => editor.layout(),
+});
+toConsole = (text, kind) => panel.console(text, kind);
+$("calc-console-toggle").addEventListener("click", () => panel.show("console"));
+for (const [text, kind] of consoleBacklog.splice(0)) panel.console(text, kind);
+/** Writes a line of TIde's own to Output. */
+function output(text: string, kind: "cmd" | "ok" | "err" | "" = "") { panel.output(text, kind); }
+const openOutput = () => panel.show("output");
 
-/** Runs a command line in the project folder, writing it and its output to the Output tab. */
+/**
+ * Runs a command line from tide.json in the project folder, in the system shell, so pipes, &&,
+ * redirects and variables work. Its full output streams to the Output panel, which opens for it.
+ */
 async function runLine(label: string, line: string): Promise<{ ok: boolean; output: string }> {
-  const { command, args } = splitCommand(line);
-  output(`> ${label}: ${line}`, "cmd");
-  const result = await fs.runCommand(project!.root, command, args);
-  if (result.output.trim()) output(result.output);
-  output(result.ok ? `${label} finished.` : `${label} failed.`, result.ok ? "ok" : "err");
-  return result;
+  panel.show("output");
+  let text = "";
+  let stop = () => {};
+  const run = panel.outputRun(label, line, () => stop());
+  const shell = fs.runShell(project!.root, line, (chunk, err) => { text += chunk; run.write(chunk, err); });
+  stop = () => void shell.stop();
+  const code = await shell.done.catch(err => { const message = `${err}`; text += message; run.write(`${message}\n`, true); return 1; });
+  run.end(code === 0, code);
+  return { ok: code === 0, output: text };
 }
 
 async function runScript(name: string) {
@@ -586,8 +598,6 @@ function settingRows(): Row[] {
     { section: "Files", label: "Encoding for other text", description: "How to read a text file that isn't UTF-8 or UTF-16. The status bar can reopen or save a file in any encoding.",
       control: { kind: "select", options: ENCODINGS.filter(e => !e.bom && e.id !== "utf-8").map(e => [encodingKey(e), e.label]),
         get: () => s.fallbackEncoding, set: v => setSetting("fallbackEncoding", v) } },
-    { section: "Calculator", label: "Console", description: "Show CEmu's output under the calculator.",
-      control: { kind: "toggle", get: () => calc.consoleShown, set: v => { calc.consoleShown = v; } } },
     { section: "Calculator", label: "Send clibs.8xg with C projects", description: "Send the CE C libraries before running a C project, when TIde finds them.", control: toggle("sendClibs") },
     { section: "Files", label: "Shift for permanent delete", description: "In the Explorer's right-click menu, show one Delete that holding Shift turns into Delete permanently. Off shows both.", control: toggle("shiftDeletes") },
     { section: "Source control", label: "Refresh when TIde gets focus", description: "Check git status again when you switch back to TIde.", control: toggle("refreshScmOnFocus") },
@@ -672,7 +682,7 @@ async function buildProject(): Promise<boolean> {
     const lines = output.split(/\r?\n/).map(l => l.trim()).filter(Boolean);
     const last = lines[lines.length - 1] ?? "";
     const why = ok ? last : lines.find(l => /\berror\b/i.test(l)) ?? last;
-    setMessage(ok ? `Built ${name}${why ? `: ${why}` : ""}` : `Build failed: ${why || `${splitCommand(line).command} exited with an error`}`);
+    setMessage(ok ? `Built ${name}${why ? `: ${why}` : ""}` : `Build failed: ${why || `${splitCommand(line).command} exited with an error`} (full log in Output)`);
     els.msg.title = output.trim(); // the full build output, on hover; it is also in the Output tab
     // The build usually creates folders like bin/ and obj/.
     await Promise.all([...dirCache.keys()].map(async dir => {
@@ -862,6 +872,28 @@ async function loadProject(root: string, reveal = true) {
   setMessage(`Opened ${hasMakefile ? "C project" : "folder"} ${project.name}`);
   void scm.refresh();
   emit("project", { root, name: project.name });
+  panel.projectChanged(root);
+  void fs.watchFolder(root).catch(err => console.error("Couldn't watch the folder", err));
+}
+
+// ── Live folders: the Explorer re-reads a folder when anything changes in it ──
+const samePath = (p: string) => p.replace(/[\\/]+$/, "").replace(/\\/g, "/").toLowerCase();
+async function foldersChanged(dirs: string[]) {
+  if (!project) return;
+  const changed = new Set(dirs.map(samePath));
+  // Only folders the Explorer has read: the rest are read when they're opened.
+  const stale = [...dirCache.keys()].filter(dir => changed.has(samePath(dir)));
+  await Promise.all(stale.map(async dir => {
+    try { dirCache.set(dir, await fs.readDir(dir)); } catch { dirCache.delete(dir); expanded.delete(dir); }
+  }));
+  // Not while a new file's name is being typed: the tree is drawn again when that's done.
+  if (stale.length && !creating) renderTree();
+  if (changed.has(samePath(joinPath(project.root, CONFIG_DIR)))) await loadConfig();
+}
+if (fs.available) {
+  import("@tauri-apps/api/event")
+    .then(({ listen }) => listen<{ dirs: string[] }>("folder://changed", e => void foldersChanged(e.payload.dirs)))
+    .catch(() => { /* not in the desktop app */ });
 }
 
 async function openFolder() {
@@ -1415,7 +1447,7 @@ function menuFor(target: HTMLElement): MenuItem[] | null {
             .then(() => setMessage("Copied the screen"), () => setMessage("Couldn't copy to the clipboard."));
         });
       } },
-      { label: calc.consoleShown ? "Hide console" : "Show console", run: () => { calc.consoleShown = !calc.consoleShown; } },
+      { label: "Show console", run: () => panel.show("console") },
       "-",
       { label: "Reset calculator", run: () => $("calc-reset").click() },
     ];
@@ -1531,6 +1563,8 @@ $("file-menu").addEventListener("click", e => {
     { label: "Project settings (.tide/tide.json)", disabled: !project, run: () => void openProjectFile() },
     { label: "Settings", shortcut: "Ctrl+,", run: openSettings },
     { label: "Extensions", shortcut: "Ctrl+Shift+X", run: () => showPane("ext") },
+    { label: "Terminal", shortcut: "Ctrl+`", run: () => panel.show("terminal", true) },
+    { label: "Output", shortcut: "Ctrl+Shift+U", run: () => panel.show("output") },
     "-",
     ...extensionItems(),
     "-",
@@ -1587,6 +1621,8 @@ window.addEventListener("keydown", e => {
   else if (key === "b") { e.preventDefault(); showPane(pane, true); }
   else if (e.shiftKey && key === "g") { e.preventDefault(); showPane("scm"); }
   else if (e.shiftKey && key === "x") { e.preventDefault(); showPane("ext"); }
+  else if (e.shiftKey && key === "u") { e.preventDefault(); panel.toggle("output"); }
+  else if (e.key === "`") { e.preventDefault(); panel.toggle("terminal"); }
   else if (key === ",") { e.preventDefault(); openSettings(); }
 });
 

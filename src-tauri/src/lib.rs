@@ -7,6 +7,8 @@ mod calc;
 mod emulator;
 mod git;
 mod project;
+mod shell;
+mod watch;
 
 const EXTENSION: &str = ".tide.txt";
 
@@ -101,6 +103,8 @@ fn list_programs(app: tauri::AppHandle) -> Result<Vec<String>, String> {
 pub fn run() {
     tauri::Builder::default()
         // Windows and Linux pass a double-clicked file on the command line; macOS sends RunEvent::Opened.
+        .manage(shell::Shells::default())
+        .manage(watch::FolderWatch::default())
         .manage(OpenedFiles(Mutex::new(tideex_paths(std::env::args().skip(1)))))
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
@@ -139,7 +143,12 @@ pub fn run() {
             calc::find_clibs,
             extensions_dir,
             reveal_extension,
-            take_opened_files
+            take_opened_files,
+            shell::shell_run,
+            shell::shell_input,
+            shell::shell_stop,
+            shell::shell_forget,
+            watch::watch_folder
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application")

@@ -68,6 +68,12 @@ export interface Fs {
   writeBinary(path: string, bytes: Uint8Array): Promise<void>;
   runMake(dir: string): Promise<{ ok: boolean; output: string }>;
   runCommand(dir: string, command: string, args: string[]): Promise<{ ok: boolean; output: string }>;
+  /** Runs a command line in the system shell in `dir`, streaming its output. */
+  runShell(dir: string, line: string, onOutput: (text: string, err: boolean) => void): ShellRun;
+  /** Watches a folder (and all in it) for changes, replacing the one watched before; null stops. */
+  watchFolder(path: string | null): Promise<void>;
+  /** The user's home folder. */
+  homeDir(): Promise<string>;
   createDir(path: string): Promise<void>;
   /** The folder extensions are installed in. */
   extensionsDir(): Promise<string>;
@@ -89,6 +95,42 @@ export interface Emulator {
 }
 
 const unavailable = () => Promise.reject(new Error("Opening folders needs the desktop app."));
+
+/** A command line running in the shell. */
+export interface ShellRun {
+  /** Resolves with the exit code when it ends: null if it was stopped. Rejects if it couldn't start. */
+  done: Promise<number | null>;
+  /** Sends text to its input, such as an answer and a newline. */
+  input(text: string): Promise<void>;
+  /** Stops it and everything it started. */
+  stop(): Promise<void>;
+}
+
+// Output and exits arrive as events for every running command, told apart by id.
+const shellRuns = new Map<number, { onOutput: (text: string, err: boolean) => void; resolve: (code: number | null) => void }>();
+let shellEvents: Promise<unknown> | null = null;
+const listenShell = () => (shellEvents ??= import("@tauri-apps/api/event").then(({ listen }) => Promise.all([
+  listen<{ id: number; text: string; err: boolean }>("shell://output", e => shellRuns.get(e.payload.id)?.onOutput(e.payload.text, e.payload.err)),
+  listen<{ id: number; code: number | null }>("shell://exit", e => {
+    const run = shellRuns.get(e.payload.id);
+    if (!run) return;
+    shellRuns.delete(e.payload.id);
+    void invoke("shell_forget", { id: e.payload.id });
+    run.resolve(e.payload.code);
+  }),
+])));
+
+function runShell(dir: string, line: string, onOutput: (text: string, err: boolean) => void): ShellRun {
+  const id = Math.floor(Math.random() * 0x7fffffff);
+  const exited = new Promise<number | null>(resolve => shellRuns.set(id, { onOutput, resolve }));
+  const started = listenShell().then(() => invoke<void>("shell_run", { id, dir, line }));
+  started.catch(() => shellRuns.delete(id));
+  return {
+    done: started.then(() => exited),
+    input: text => invoke<void>("shell_input", { id, text }),
+    stop: () => invoke<void>("shell_stop", { id }),
+  };
+}
 
 export const fs: Fs = isTauri
   ? {
@@ -126,6 +168,9 @@ export const fs: Fs = isTauri
       takeOpenedFiles: () => invoke<string[]>("take_opened_files"),
       deletePath: (path, permanent) => invoke<void>("delete_path", { path, permanent }),
       runCommand: (dir, command, args) => invoke<{ ok: boolean; output: string }>("run_command", { dir, command, args }),
+      runShell,
+      watchFolder: path => invoke<void>("watch_folder", { path }),
+      homeDir: () => import("@tauri-apps/api/path").then(p => p.homeDir()),
       git: {
         status: dir => invoke<GitStatus>("git_status", { dir }),
         stage: (dir, paths) => invoke<GitResult>("git_stage", { dir, paths }),
@@ -156,6 +201,9 @@ export const fs: Fs = isTauri
       writeBinary: unavailable,
       runMake: unavailable,
       runCommand: unavailable,
+      runShell: () => ({ done: Promise.reject(new Error("The terminal needs the desktop app.")), input: unavailable, stop: async () => {} }),
+      homeDir: unavailable,
+      watchFolder: async () => {},
       createDir: unavailable,
       extensionsDir: unavailable,
       revealExtension: unavailable,
