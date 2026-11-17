@@ -29,9 +29,11 @@ jobs:
     timeout-minutes: 355
     env:
       BUILD: /home/runner/llvm
-      KEY: clang-${{ hashFiles('toolchain/clang/build.sh') }}
     steps:
       - uses: actions/checkout@v4
+
+      - name: Name the cache after the build script
+        run: echo "KEY=clang-${{ hashFiles('toolchain/clang/build.sh') }}" >> "$GITHUB_ENV"
 
       - name: Restore the build folder from an earlier run
         uses: actions/cache/restore@v4
