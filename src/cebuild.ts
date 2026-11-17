@@ -206,7 +206,7 @@ export async function buildCeProject(project: Map<string, Uint8Array>, log: (tex
     const libCxx = yes("HAS_LIBCXX", true) ? [lib("libcxx/libcxx.a")] : [];
     const group = [libCrt, lib("ce/libce.a"), lib("softfloat/libsoftfloat.a"), libC, ...libCxx];
 
-    await step("linking", "ld", ["-i", "-static", "--entry=__start", "--build-id=none", "--gc-sections", "--omagic", "--defsym", "__TICE__=1",
+    await step("linking", "ld", ["-i", "-static", "--entry=__start", "--build-id=none", "--no-warn-execstack", "--gc-sections", "--omagic", "--defsym", "__TICE__=1",
       ...(allocator === "CUSTOM" ? ["--undefined", "_malloc", "--undefined", "_free", "--undefined", "_realloc"] : []),
       ...(printf ? [] : ["--defsym", "_sprintf=0x0000BC"]),
       ...objects,

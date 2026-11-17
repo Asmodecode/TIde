@@ -1,5 +1,5 @@
 #!/bin/sh
-# Builds ez80-clang (CE-Programming's LLVM fork, "Stable v15.0.7", Apache-2.0 with LLVM exceptions)
+# Builds ez80-clang (CE-Programming's LLVM fork, LLVM 19.1, Apache-2.0 with LLVM exceptions)
 # with Emscripten for TIde: clang.js and clang.wasm, into the folder given. Only the Z80/eZ80 backend
 # and Clang are built. Run inside an Emscripten container:
 #   docker run --rm -v "$PWD:/w" -w /w \
@@ -12,7 +12,7 @@
 # can take over a gigabyte of memory, so it's lower than the CPU count by default.
 set -eu
 REPO=https://github.com/CE-Programming/llvm-project.git
-COMMIT=31b787336940cbc96d054033c3d843f344507042   # tag v15, "Stable v15.0.7 (z80/ez80)"
+COMMIT=ef28e9c54cd1333a6091ab2ffbd315b465fc5090   # the ez80-clang in CE C Toolchain v15.0 (its libraries are built with it)
 OUT="$(mkdir -p "$1" && cd "$1" && pwd)"
 JOBS="${JOBS:-5}"
 WORK=/build
@@ -50,6 +50,7 @@ if [ ! -f "$WORK/wasm/Makefile" ]; then
     -DCMAKE_EXE_LINKER_FLAGS="$LINK"
 fi
 make -C "$WORK/wasm" -j"$JOBS" clang
-cp "$WORK/wasm/bin/clang" "$OUT/clang.js"
+# Emscripten names it clang.js (a link to clang.js-<version>).
+cp -L "$WORK/wasm/bin/clang.js" "$OUT/clang.js"
 cp "$WORK/wasm/bin/clang.wasm" "$OUT/clang.wasm"
 ls -la "$OUT"

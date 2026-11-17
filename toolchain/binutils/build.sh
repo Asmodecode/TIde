@@ -31,6 +31,10 @@ mkdir -p "$WORK/obj"
 cd "$WORK/obj"
 # Emscripten's libc has psignal, but configure's link test can't tell, and libiberty's own copy clashes.
 export ac_cv_func_psignal=yes
+# Emscripten's getrusage writes 16 bytes past the struct it's given (musl hands its syscall stub a pointer
+# into the struct, and the stub clears a whole struct from there). In ld that wipes the last command-line
+# argument, so leave getrusage out: libiberty and ld fall back to times().
+export ac_cv_func_getrusage=no
 # Programs the build makes and runs itself (such as bfd's doc generator) are for this machine, not WebAssembly.
 export CC_FOR_BUILD=gcc CXX_FOR_BUILD=g++
 if [ ! -f Makefile ]; then
@@ -43,14 +47,20 @@ fi
 # On the command line, so it reaches every sub-make (bfd's doc generator, chew, runs during the build).
 NATIVE="CC_FOR_BUILD=gcc CXX_FOR_BUILD=g++ M4=m4"
 rm -f bfd/doc/chew bfd/doc/chew.stamp bfd/doc/chew.wasm   # a WebAssembly chew from an earlier run
+# A folder configured while getrusage was still used: configure it again.
+for d in libiberty ld gas binutils; do
+  if grep -q "define HAVE_GETRUSAGE 1" "$d/config.h" 2>/dev/null; then rm -rf "$d"; fi
+done
 # A folder configured before bison and flex were installed thinks they're missing: configure it again.
 for d in binutils ld gas; do
   if grep -qE "missing (flex|bison|lex|yacc)" "$d/config.status" 2>/dev/null; then rm -rf "$d"; fi
 done
 emmake make -j"$(nproc)" configure-zlib configure-libiberty configure-libsframe configure-bfd configure-opcodes configure-libctf \
   configure-gas configure-ld configure-binutils MAKEINFO=true $NATIVE
-# The programs themselves, as ES modules the page can load and run more than once.
-WASM="-s MODULARIZE=1 -s EXPORT_ES6=1 -s INVOKE_RUN=0 -s EXIT_RUNTIME=1 -s ALLOW_MEMORY_GROWTH=1 -s FORCE_FILESYSTEM=1 -s ENVIRONMENT=web,worker -s EXPORTED_RUNTIME_METHODS=FS,callMain"
+# The programs themselves, as ES modules the page can load and run more than once, with more stack than
+# Emscripten's 64 KB default (big links recurse deeply). Linked again on every run, so a change here reaches them.
+rm -f gas/as-new ld/ld-new binutils/objcopy
+WASM="-s STACK_SIZE=4MB -s MODULARIZE=1 -s EXPORT_ES6=1 -s INVOKE_RUN=0 -s EXIT_RUNTIME=1 -s ALLOW_MEMORY_GROWTH=1 -s FORCE_FILESYSTEM=1 -s ENVIRONMENT=web,worker -s EXPORTED_RUNTIME_METHODS=FS,callMain"
 emmake make -j"$(nproc)" all-gas all-ld MAKEINFO=true LDFLAGS="$WASM" $NATIVE
 # Only objcopy from binutils/: the rest (ar, readelf, windres…) isn't needed, and some need generated parsers.
 emmake make -C binutils -j"$(nproc)" objcopy MAKEINFO=true LDFLAGS="$WASM" $NATIVE
