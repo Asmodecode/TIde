@@ -1,0 +1,38 @@
+name: Web toolchain
+
+# Builds ez80-clang for WebAssembly (toolchain/clang/build.sh) and publishes it to the
+# "web-toolchain" release, where the web version's build downloads it: at tens of megabytes it's
+# too big to keep in the repository like the other tools in toolchain/. Run it by hand when the
+# Clang build changes. It takes a few hours.
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  clang:
+    name: ez80-clang for WebAssembly
+    runs-on: ubuntu-latest
+    timeout-minutes: 350
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build
+        run: |
+          docker run --rm -v "$PWD:/w" -w /w -e JOBS=4 \
+            -v tide-llvm:/build emscripten/emsdk:3.1.74 sh toolchain/clang/build.sh toolchain/clang/dist
+          printf 'clang.js and clang.wasm are ez80-clang from CE-Programming/llvm-project (Apache-2.0 with LLVM exceptions),\nbuilt from https://github.com/CE-Programming/llvm-project/tree/31b787336940cbc96d054033c3d843f344507042 (tag v15)\nby toolchain/clang/build.sh in https://github.com/%s/tree/%s.\n' "$GITHUB_REPOSITORY" "$GITHUB_SHA" > toolchain/clang/dist/SOURCE.txt
+          ls -la toolchain/clang/dist
+
+      - name: Publish to the web-toolchain release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+        run: |
+          if ! gh release view web-toolchain --repo "$REPO" >/dev/null 2>&1; then
+            gh release create web-toolchain --repo "$REPO" --prerelease --title "Web toolchain" \
+              --notes "ez80-clang compiled to WebAssembly, for TIde's web version. Built by the Web toolchain workflow."
+          fi
+          gh release upload web-toolchain toolchain/clang/dist/clang.js toolchain/clang/dist/clang.wasm toolchain/clang/dist/SOURCE.txt \
+            --repo "$REPO" --clobber

@@ -27,6 +27,7 @@ import { EXTENSION_SCHEMA, EXTENSION_TYPES, emit, extensionCommands, extensionsF
 import { createExtensionsView } from "./extensions-view";
 import { createPanel } from "./panel";
 import { assemble, programName } from "./spasm";
+import { buildCeProject } from "./cebuild";
 import { fs, normalizeName, store, type Entry } from "./store";
 
 (self as unknown as { MonacoEnvironment: object }).MonacoEnvironment = {
@@ -720,6 +721,34 @@ async function saveActive() {
 
 /** Saves every changed project file, runs make in the folder, and shows the result in the status bar. */
 /** Saves, runs make, and reports the result. Resolves true when the build succeeded. */
+/**
+ * The web version's make: the CE toolchain compiled to WebAssembly, building the project the way its
+ * makefile would, with the log streaming to Output. Writes bin/ (the .8xp and the linked .obj) back
+ * to the project.
+ */
+async function buildInBrowser(line: string): Promise<{ ok: boolean; output: string }> {
+  panel.show("output");
+  let text = "";
+  const run = panel.outputRun("Build", "make (in the browser)", () => {});
+  const log = (chunk: string, err: boolean) => { text += chunk; run.write(chunk, err); };
+  if (line.trim() !== "make") {
+    log(`"${line}" is a command line, and the web version can only run the CE toolchain's make. Build it in the desktop app, or remove "build" from .tide/tide.json.\n`, true);
+    run.end(false, 1);
+    return { ok: false, output: text };
+  }
+  try {
+    const result = await buildCeProject(await projectFiles(), log);
+    for (const [rel, bytes] of result.files) if (rel.startsWith("bin/")) await fs.writeBinary(joinPath(project!.root, rel), bytes);
+    run.end(result.ok, result.ok ? 0 : 1);
+    if (result.ok) text += `\nbin/${result.name}.8xp\n`;
+    return { ok: result.ok, output: text };
+  } catch (err) {
+    log(`${err instanceof Error ? err.message : err}\n`, true);
+    run.end(false, 1);
+    return { ok: false, output: text };
+  }
+}
+
 async function buildProject(): Promise<boolean> {
   if (!project || building) return false;
   const { name } = project;
@@ -731,7 +760,7 @@ async function buildProject(): Promise<boolean> {
   setMessage(`Building ${name}…`);
   try {
     const line = config.build ?? "make";
-    const { ok, output } = await runLine("Build", line);
+    const { ok, output } = fs.web ? await buildInBrowser(line) : await runLine("Build", line);
     const lines = output.split(/\r?\n/).map(l => l.trim()).filter(Boolean);
     const last = lines[lines.length - 1] ?? "";
     const why = ok ? last : lines.find(l => /\berror\b/i.test(l)) ?? last;

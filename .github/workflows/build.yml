@@ -218,6 +218,14 @@ jobs:
           node-version: 22
           cache: npm
       - run: npm ci
+      # The C compiler is too big for the repository: it comes from the web-toolchain release
+      # (the Web toolchain workflow builds it). Without it, the site builds everything but C.
+      - name: Get ez80-clang
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          mkdir -p toolchain/clang/dist
+          gh release download web-toolchain --repo "${{ github.repository }}" --pattern "clang.*" --dir toolchain/clang/dist             || echo "::warning::No web-toolchain release yet, so the web version can't compile C. Run the Web toolchain workflow."
       - run: npm run build:web
       - uses: actions/upload-pages-artifact@v3
         with:
