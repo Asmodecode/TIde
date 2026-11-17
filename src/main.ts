@@ -26,6 +26,7 @@ import { exportProgram } from "./export";
 import { EXTENSION_SCHEMA, EXTENSION_TYPES, emit, extensionCommands, extensionsFolder, loadExtensions, reloadExtensions, type BundledExtension, type ExtensionHost, type ExtensionManifest } from "./extensions";
 import { createExtensionsView } from "./extensions-view";
 import { createPanel } from "./panel";
+import { assemble, programName } from "./spasm";
 import { fs, normalizeName, store, type Entry } from "./store";
 
 (self as unknown as { MonacoEnvironment: object }).MonacoEnvironment = {
@@ -223,6 +224,58 @@ const activeDoc = () => (active ? docs.get(active) : undefined);
 const mod = (e: KeyboardEvent) => e.ctrlKey || e.metaKey;
 /** In a folder with a Makefile, everything except a TI-BASIC program builds with make. */
 const usesMake = () => !!project && (project.hasMakefile || !!config.build) && activeDoc()?.language !== "tibasic";
+/** The open file is assembly that spasm-ng builds: z80 (TI-83 Plus / 84 Plus), or eZ80 outside a make project. */
+const assemblesActive = () => {
+  const doc = activeDoc();
+  return !!doc && !!project && doc.id.startsWith("file:") && (doc.language === "z80" || (doc.language === ASM_LANG && !usesMake()));
+};
+
+/** The project's files, by path relative to its root with "/", for the assembler. Leaves out hidden and build folders. */
+async function projectFiles(): Promise<Map<string, Uint8Array>> {
+  const out = new Map<string, Uint8Array>();
+  const walk = async (dir: string, rel: string) => {
+    for (const e of await fs.readDir(dir)) {
+      if (e.name.startsWith(".") || (e.isDir && ["node_modules", "bin", "obj", "target"].includes(e.name))) continue;
+      if (out.size > 2000) return;
+      if (e.isDir) await walk(e.path, `${rel}${e.name}/`);
+      else if (!/\.(8x[a-z]|8e[a-z]|b8[34]|rom|zip|exe|png|jpe?g|gif)$/i.test(e.name)) out.set(`${rel}${e.name}`, await fs.readBinary(e.path));
+    }
+  };
+  await walk(project!.root, "");
+  return out;
+}
+
+/** Assembles the open file with spasm-ng: its log in Output, and the program on success. */
+async function assembleActive(): Promise<{ name: string; bytes: Uint8Array; path: string } | null> {
+  const doc = activeDoc()!;
+  if (isDirty(doc)) await saveDoc(doc);
+  const path = doc.id.slice(5);
+  const rel = path.slice(project!.root.length).replace(/^[\\/]+/, "").replace(/\\/g, "/");
+  const name = programName(baseName(path));
+  const ez80 = doc.language === ASM_LANG;
+  setMessage(`Assembling ${doc.label}…`);
+  const run = panel.outputRun("Assemble", `spasm${ez80 ? " -E" : ""} ${rel} → ${name}.8xp`, () => {});
+  try {
+    const result = await assemble(await projectFiles(), rel, name, ez80);
+    if (result.log.trim()) run.write(`${result.log.trim()}\n`, !result.ok);
+    run.end(result.ok, result.ok ? 0 : 1);
+    if (!result.ok || !result.bytes) {
+      panel.show("output");
+      const first = result.log.split("\n").find(l => /error/i.test(l));
+      setMessage(`${doc.label} didn't assemble${first ? `: ${first.trim()}` : ""} (full log in Output)`);
+      return null;
+    }
+    const out = joinPath(parentOf(path), `${name}.8xp`);
+    await fs.writeBinary(out, result.bytes);
+    setMessage(`Assembled ${doc.label} into ${name}.8xp (${result.bytes.length} bytes)`);
+    return { name, bytes: result.bytes, path: out };
+  } catch (err) {
+    run.write(`${err}\n`, true);
+    run.end(false, 1);
+    setMessage(`Could not assemble ${doc.label}: ${err}`);
+    return null;
+  }
+}
 const joinPath = (root: string, rel: string) => {
   const sep = root.includes("\\") ? "\\" : "/";
   return [root.replace(/[\\/]+$/, ""), ...rel.split(/[\\/]/).filter(Boolean)].join(sep);
@@ -417,7 +470,7 @@ async function tiFileView(entry: Entry, bytes: Uint8Array): Promise<View> {
 
 // ── The panel under the editor: Output (build, prerun, postrun and script logs) and Terminal ──
 const panel = createPanel({
-  available: fs.available,
+  available: fs.desktop,
   runShell: (dir, line, onOutput) => fs.runShell(dir, line, onOutput),
   homeDir: () => fs.homeDir(),
   projectRoot: () => project?.root ?? null,
@@ -727,6 +780,12 @@ async function buildForRun(): Promise<ForRun | null> {
     if (family === "ce" && getTarget() === "plus") { setMessage("The calculator is a TI-84 Plus CE. Switch Target to CE, or pick a TI-84 Plus in the calculator's model menu."); return null; }
     if (family === "other") { setMessage("Run sends .8xp programs, for the TI-83 Plus, 84 Plus and CE. Pick one in the calculator's model menu."); return null; }
   }
+  if (assemblesActive()) {
+    const built = await assembleActive();
+    if (!built) return null;
+    if (!(await prerun())) return null;
+    return { programs: [{ name: `${built.name}.8xp`, path: built.path, bytes: built.bytes }], launch: built.name, libs: [] };
+  }
   if (usesMake()) {
     const root = project!.root;
     if (!(await buildProject())) return null;
@@ -796,6 +855,7 @@ function rememberBuild(name: string, path: string | null) {
 
 /** Tokenizes the active TI-BASIC program and writes a real .8xp the calculator accepts. Asks where only the first time, or when `pick` is set. */
 async function exportActive(pick = false) {
+  if (assemblesActive()) { await assembleActive(); return; }
   if (usesMake()) return buildProject();
   const doc = activeDoc();
   if (!doc) return setMessage("Nothing to build.");
@@ -890,10 +950,20 @@ async function foldersChanged(dirs: string[]) {
   if (stale.length && !creating) renderTree();
   if (changed.has(samePath(joinPath(project.root, CONFIG_DIR)))) await loadConfig();
 }
-if (fs.available) {
+if (fs.desktop) {
   import("@tauri-apps/api/event")
     .then(({ listen }) => listen<{ dirs: string[] }>("folder://changed", e => void foldersChanged(e.payload.dirs)))
     .catch(() => { /* not in the desktop app */ });
+}
+
+/** Web only: opens or makes a project kept in the browser's storage. */
+async function openBrowserProject() {
+  try {
+    const root = await fs.pickBrowserProject?.();
+    if (root) await loadProject(root);
+  } catch (err) {
+    setMessage(`Could not open the project: ${err instanceof Error ? err.message : err}`);
+  }
 }
 
 async function openFolder() {
@@ -1132,11 +1202,13 @@ function applyEditorMode() {
   els.gutter.setAttribute("aria-pressed", String(showNumbers));
   els.target.hidden = !basic;
   els.target.textContent = `Target: ${TARGETS[getTarget()].label}`;
-  const make = usesMake();
-  els.exportBtn.hidden = !make && (!basic || !activeDoc());
+  const make = usesMake(), asm = assemblesActive();
+  els.exportBtn.hidden = !make && !asm && (!basic || !activeDoc());
   els.run.hidden = !fs.available || els.exportBtn.hidden;
-  els.exportBtn.textContent = make ? "Build" : "Build .8xp";
-  els.exportBtn.title = make
+  els.exportBtn.textContent = asm ? "Assemble .8xp" : make ? "Build" : "Build .8xp";
+  els.exportBtn.title = asm
+    ? "Assembles this file with spasm-ng into an .8xp next to it (Ctrl+E). F5 also sends it to the calculator."
+    : make
     ? `Runs make in ${project?.name} (Ctrl+E). Saves changed files first.`
     : "Ctrl+E rebuilds to the same file. Ctrl+Shift+E picks a new location.";
   renderDocList(); // the docs follow the toolchain of the active tab
@@ -1551,6 +1623,7 @@ $("file-menu").addEventListener("click", e => {
     { label: "New folder…", disabled: !project, run: () => void (project && createIn(targetDir ?? project.root, "folder")) },
     "-",
     { label: "Open folder…", shortcut: "Ctrl+Shift+O", run: () => void openFolder() },
+    ...(fs.web ? [{ label: "Open browser project…", run: () => void openBrowserProject() }] : []),
     { label: "Send files to calculator…", run: () => { void calc.show().then(() => $("calc-send").click()); } },
     "-",
     { label: "Save", shortcut: "Ctrl+S", disabled: !doc, run: () => void saveActive() },
@@ -1632,7 +1705,16 @@ showPane("files");
 renderTree();
 
 // Desktop builds check the latest release for an update; the status bar shows the version and checks on click.
-if (fs.available) {
+if (fs.web) {
+  // The web version: no updates to check; the status bar links to the desktop app instead.
+  const version = $<HTMLButtonElement>("version");
+  version.hidden = false;
+  version.textContent = "TIde Web";
+  version.title = "Get the desktop app, with the terminal, source control and updates";
+  version.addEventListener("click", () => window.open("https://github.com/XSamuraiCoder/TIde/releases/latest", "_blank", "noopener"));
+  $("calc-cemu").hidden = true;
+}
+if (fs.desktop) {
   const version = $<HTMLButtonElement>("version");
   version.hidden = false;
   appVersion().then(v => { version.textContent = `TIde ${v}`; }).catch(() => { version.textContent = "TIde"; });
@@ -1690,7 +1772,7 @@ const BUNDLED: BundledExtension[] = (() => {
 const extensionsReady = loadExtensions(extensionHost, BUNDLED);
 // .TIdeex files install when TIde is opened with one (double-click, or Open with), or one is dropped on
 // the window. They wait for the installed extensions to load, so a newer version is seen as one.
-if (fs.available) {
+if (fs.desktop) {
   const installOpened = () => fs.takeOpenedFiles().then(paths => { for (const p of paths) void extensionsView.install(p); });
   void extensionsReady.then(installOpened);
   import("@tauri-apps/api/event").then(({ listen }) => listen("tide://opened-files", () => void extensionsReady.then(installOpened))).catch(() => {});
@@ -1699,7 +1781,7 @@ if (fs.available) {
     for (const p of e.payload.paths.filter(p => /\.tideex$/i.test(p))) void extensionsView.install(p);
   })).catch(() => { /* not in the desktop app */ });
 }
-if (fs.available) appVersion().then(v => { extensionHost.version = v; }).catch(() => { /* stays "dev" */ });
+if (fs.desktop) appVersion().then(v => { extensionHost.version = v; }).catch(() => { /* stays "dev" */ });
 
 // Reopen the last project folder, quietly: if it moved or was deleted, just start empty.
 if (fs.available) {

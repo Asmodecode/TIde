@@ -7,6 +7,10 @@ Installers for Windows, Linux and macOS are published on the `latest` release by
 - **Windows:** `TIde_<version>_x64-portable.exe` runs on its own. It needs WebView2, which Windows 11 already includes, and it still saves programs in your user folder rather than next to the exe.
 - **macOS:** `TIde_<version>_aarch64.app.zip` (Apple Silicon) or `TIde_<version>_x64.app.zip` (Intel) contains `TIde.app`. The app isn't signed, so if macOS says it is damaged, run `xattr -cr TIde.app` once.
 
+## Web version
+
+TIde also runs in the browser, at [xsamuraicoder.github.io/TIde](https://xsamuraicoder.github.io/TIde/), published with every stable release. It has the editor, IntelliSense, docs, extensions and both calculator emulators, and builds in the browser: TI-BASIC to `.8xp`, and TI-83 Plus / 84 Plus z80 and TI-84 Plus CE eZ80 assembly with spasm-ng compiled to WebAssembly. **File → Open folder…** opens a real folder on your computer in Chrome and Edge; **File → Open browser project…** keeps a project in the browser's own storage, on any browser. Calculator ROMs stay in the browser's storage too. The terminal, source control, the CEmu app and updates are in the desktop app. To build it yourself: `npm run build:web` (into `dist-web`).
+
 ## TI-BASIC
 
 Programs live in the list under **Programs**, separate from any folder you open.

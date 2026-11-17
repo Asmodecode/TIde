@@ -237,7 +237,7 @@ export function createPanel(opts: {
     if (opening) fitHeight();
     if (next === "terminal") {
       void ensureCwd().then(showPrompt);
-      if (!opts.available) termLog.note("The terminal needs the desktop app.", "err");
+      if (!opts.available) termLog.note("The terminal is in the desktop app. Builds in the web version show their logs in Output.", "info");
     }
     if (focus && next === "terminal") input.focus();
   }

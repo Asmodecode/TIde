@@ -1,0 +1,3 @@
+Spasm.js and Spasm.wasm are spasm-ng (GPLv2), built from
+https://github.com/alberthdev/spasm-ng/tree/5f0786d38f064835be674d4b7df42969967bb73c
+with ../build.sh (no app signing). The .inc files are spasm-ng's own include files.

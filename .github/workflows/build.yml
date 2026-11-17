@@ -198,6 +198,33 @@ jobs:
           printf 'Uploading: %s\n' "${files[@]}"
           gh release upload "$RELEASE" "${files[@]}" --repo "$REPO" --clobber
 
+  web:
+    name: Web version (GitHub Pages)
+    # Each stable release also publishes TIde's web version, at https://<owner>.github.io/TIde/.
+    if: needs.prepare.outputs.stable == 'true'
+    needs: prepare
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deploy.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run build:web
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: dist-web
+      - id: deploy
+        uses: actions/deploy-pages@v4
+
   finish:
     name: Finish release
     # Runs only if every platform built, so a failed build keeps that platform's old installers.

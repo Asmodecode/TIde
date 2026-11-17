@@ -1,4 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
+import { BROWSER, webCalc, webFs } from "./webfs";
 
 export interface Store {
   list(): Promise<string[]>;
@@ -52,8 +53,26 @@ export interface Git {
   init(dir: string): Promise<GitResult>;
 }
 
+/** The calculator's files: its emulator cores and the user's ROMs. */
+export interface CalcFiles {
+  files(): Promise<{ rom: boolean; roms: string[] }>;
+  /** A core's script or WebAssembly, CE.rom, or "roms/" and a stored ROM's name. */
+  read(name: string): Promise<Uint8Array>;
+  /** Keeps a ROM; returns "ce", or "rom:" and the name it's kept under. */
+  setRom(path: string): Promise<string>;
+  removeRom(name: string): Promise<void>;
+}
+
 export interface Fs {
+  /** Whether files and folders can be opened: in the desktop app, and in the web version. */
   available: boolean;
+  /** The desktop app, with its shell, git, the CEmu app and updates. */
+  desktop: boolean;
+  /** The web version. */
+  web: boolean;
+  /** Web only: opens or makes a project kept in the browser's storage. */
+  pickBrowserProject?(): Promise<string | null>;
+  calc: CalcFiles;
   pickFolder(): Promise<string | null>;
   /** A save dialog; the filter defaults to TI-84 programs. */
   pickSaveFile(defaultName: string, filter?: { name: string; extensions: string[] }): Promise<string | null>;
@@ -94,7 +113,7 @@ export interface Emulator {
   run(files: string[], launch?: string): Promise<void>;
 }
 
-const unavailable = () => Promise.reject(new Error("Opening folders needs the desktop app."));
+const desktopOnly = () => Promise.reject(new Error("That needs the desktop app."));
 
 /** A command line running in the shell. */
 export interface ShellRun {
@@ -135,6 +154,14 @@ function runShell(dir: string, line: string, onOutput: (text: string, err: boole
 export const fs: Fs = isTauri
   ? {
       available: true,
+      desktop: true,
+      web: false,
+      calc: {
+        files: () => invoke<{ rom: boolean; roms: string[] }>("calc_files"),
+        read: async name => new Uint8Array(await invoke<ArrayBuffer>("calc_read", { name })),
+        setRom: path => invoke<string>("calc_set_rom", { path }),
+        removeRom: name => invoke<void>("calc_remove_rom", { name }),
+      },
       async pickFolder() {
         const { open } = await import("@tauri-apps/plugin-dialog");
         const picked = await open({ directory: true, multiple: false });
@@ -188,27 +215,32 @@ export const fs: Fs = isTauri
       },
     }
   : {
-      available: false,
-      pickFolder: unavailable,
-      pickSaveFile: unavailable,
-      pickFile: unavailable,
-      pickFiles: unavailable,
-      readBinary: unavailable,
-      findClibs: unavailable,
-      readDir: unavailable,
-      readFile: unavailable,
-      writeFile: unavailable,
-      writeBinary: unavailable,
-      runMake: unavailable,
-      runCommand: unavailable,
-      runShell: () => ({ done: Promise.reject(new Error("The terminal needs the desktop app.")), input: unavailable, stop: async () => {} }),
-      homeDir: unavailable,
+      // The web version: files from webfs.ts; no shell, git, CEmu app or updates.
+      available: true,
+      desktop: false,
+      web: true,
+      calc: webCalc,
+      pickFolder: webFs.pickFolder,
+      pickBrowserProject: webFs.pickBrowserProject,
+      pickSaveFile: webFs.pickSaveFile,
+      pickFile: webFs.pickFile,
+      pickFiles: webFs.pickFiles,
+      readBinary: webFs.readBinary,
+      findClibs: webFs.findClibs,
+      readDir: webFs.readDir,
+      readFile: webFs.readFile,
+      writeFile: webFs.writeFile,
+      writeBinary: webFs.writeBinary,
+      runMake: desktopOnly,
+      runCommand: desktopOnly,
+      runShell: () => ({ done: Promise.reject(new Error("The terminal is in the desktop app.")), input: desktopOnly, stop: async () => {} }),
+      homeDir: async () => BROWSER,
       watchFolder: async () => {},
-      createDir: unavailable,
-      extensionsDir: unavailable,
-      revealExtension: unavailable,
+      createDir: webFs.createDir,
+      extensionsDir: webFs.extensionsDir,
+      revealExtension: desktopOnly,
       takeOpenedFiles: async () => [],
-      deletePath: unavailable,
-      emulator: { status: unavailable, install: unavailable, stage: unavailable, run: unavailable },
-      git: { status: unavailable, stage: unavailable, unstage: unavailable, commit: unavailable, push: unavailable, pull: unavailable, init: unavailable },
+      deletePath: path => webFs.deletePath(path),
+      emulator: { status: async () => null, install: desktopOnly, stage: desktopOnly, run: desktopOnly },
+      git: { status: desktopOnly, stage: desktopOnly, unstage: desktopOnly, commit: desktopOnly, push: desktopOnly, pull: desktopOnly, init: desktopOnly },
     };

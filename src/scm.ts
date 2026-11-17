@@ -141,7 +141,7 @@ export function createScm(opts: {
         ui.repo.hidden = !repo;
         ui.init.hidden = !init;
       };
-      if (!fs.available) { show("Source control needs the desktop app."); opts.changed(null); return; }
+      if (!fs.desktop) { show("Source control is in the desktop app."); opts.changed(null); return; }
       if (!root) { show("Open a folder to use source control."); opts.changed(null); return; }
       let status: GitStatus;
       try {

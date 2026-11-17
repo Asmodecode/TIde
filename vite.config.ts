@@ -4,7 +4,10 @@ import process from "node:process";
 const host = process.env.TAURI_DEV_HOST;
 
 // https://vite.dev/config/
-export default defineConfig(() => ({
+export default defineConfig(({ mode }) => ({
+  // The web version is served from GitHub Pages at /TIde/; the desktop app from the root.
+  base: mode === "web" ? "/TIde/" : "/",
+  build: mode === "web" ? { outDir: "dist-web" } : {},
   // Vite options tailored for Tauri development and only applied in `tauri dev` or `tauri build`
   //
   // 1. prevent Vite from obscuring rust errors

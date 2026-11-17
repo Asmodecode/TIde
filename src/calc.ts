@@ -5,7 +5,7 @@
 //   and 86, which runs a frame at a time on TIde's timer and sends files over its link at once.
 // The model menu on the calculator bar picks one: the CE, or any ROM you've added for the others.
 // Both draw to the same canvas and share one keypad, relabelled for the TI-85 and 86.
-import { invoke } from "@tauri-apps/api/core";
+import { fs } from "./store";
 
 const $ = <T extends HTMLElement>(id: string) => document.getElementById(id) as T;
 
@@ -373,8 +373,8 @@ export function createCalc(opts: {
 
   // ── Models and files ──
   type Files = { rom: boolean; roms: string[] };
-  const files = () => invoke<Files>("calc_files");
-  const read = async (name: string) => new Uint8Array(await invoke<ArrayBuffer>("calc_read", { name }));
+  const files = (): Promise<Files> => fs.calc.files();
+  const read = (name: string) => fs.calc.read(name);
   const MODEL_PREF = "tide-pref-calc-model", NAMES_PREF = "tide-pref-calc-rom-models";
   /** "ce", or "rom:" and a stored ROM's file name. */
   let choice = "ce";
@@ -687,7 +687,7 @@ export function createCalc(opts: {
     const path = await opts.pickRom();
     if (!path) return;
     try {
-      const stored = await invoke<string>("calc_set_rom", { path });
+      const stored = await fs.calc.setRom(path);
       say(stored === "ce" ? "Saved the TI-84 Plus CE ROM." : `Saved ${stored.slice(4)}.`);
       known = await files();
       await choose(stored);
@@ -704,7 +704,7 @@ export function createCalc(opts: {
       const name = choice.slice(4);
       if (!confirm(`Remove ${name} from TIde? The file you added it from stays where it is.`)) return;
       try {
-        await invoke("calc_remove_rom", { name });
+        await fs.calc.removeRom(name);
         delete romModels[name];
         remember(NAMES_PREF, romModels);
         known = await files();
