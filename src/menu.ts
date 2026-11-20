@@ -3,7 +3,8 @@
 
 type Action = { label: string; shortcut?: string; run: () => void };
 /** A menu item. With `shift`, holding Shift while the menu is open turns it into that other action. */
-export type MenuItem = (Action & { disabled?: unknown; shift?: Action }) | "-";
+/** With `checked`, it's a setting that's on (a check mark) or off. */
+export type MenuItem = (Action & { disabled?: unknown; shift?: Action; checked?: boolean }) | "-";
 
 let open: HTMLElement | null = null;
 let shiftHeld = false;
@@ -45,6 +46,11 @@ export function showMenu(x: number, y: number, items: MenuItem[]) {
     const label = Object.assign(document.createElement("span"), { textContent: item.label });
     const key = Object.assign(document.createElement("kbd"), { textContent: item.shortcut ?? "" });
     row.append(label, key);
+    if (item.checked !== undefined) {
+      row.setAttribute("role", "menuitemcheckbox");
+      row.setAttribute("aria-checked", String(item.checked));
+      row.prepend(Object.assign(document.createElement("i"), { className: "check", textContent: item.checked ? "✓" : "", ariaHidden: "true" }));
+    }
     if (item.shift) {
       const alt = item.shift;
       shiftRows.push(on => {

@@ -15,11 +15,16 @@
       {
         "title": "TIde",
         "width": 800,
-        "height": 600
+        "height": 600,
+        "dragDropEnabled": false
       }
     ],
     "security": {
-      "csp": null
+      "csp": null,
+      "headers": {
+        "Cross-Origin-Opener-Policy": "same-origin",
+        "Cross-Origin-Embedder-Policy": "credentialless"
+      }
     }
   },
   "bundle": {

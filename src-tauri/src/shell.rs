@@ -54,7 +54,7 @@ fn shell_command(line: &str) -> Command {
 }
 
 /// Splits off a trailing, unfinished UTF-8 sequence, so a character cut between two reads isn't garbled.
-fn split_utf8(buf: &[u8]) -> usize {
+pub(crate) fn split_utf8(buf: &[u8]) -> usize {
     let len = buf.len();
     for back in 1..=3.min(len) {
         let b = buf[len - back];

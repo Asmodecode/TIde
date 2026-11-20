@@ -2,6 +2,7 @@ import { defineConfig } from "vite";
 // @ts-expect-error type error without @types/node package
 import process from "node:process";
 const host = process.env.TAURI_DEV_HOST;
+const ISOLATION = { "Cross-Origin-Opener-Policy": "same-origin", "Cross-Origin-Embedder-Policy": "credentialless" };
 
 // https://vite.dev/config/
 export default defineConfig(({ mode }) => ({
@@ -35,7 +36,10 @@ export default defineConfig(({ mode }) => ({
       // 3. tell Vite to ignore watching `src-tauri`
       ignored: ["**/src-tauri/**"],
     },
+    // Cross-origin isolation: the calculator link (public/webtilp) runs on WebAssembly threads.
+    headers: ISOLATION,
     // Transform the entry and its imports as soon as the server starts, not on first request.
     warmup: { clientFiles: ["./src/main.ts"] },
   },
+  preview: { headers: ISOLATION },
 }));

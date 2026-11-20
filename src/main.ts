@@ -7,6 +7,8 @@ import jsonWorker from "monaco-editor/language/json/json.worker.js?worker";
 import tsWorker from "monaco-editor/language/typescript/ts.worker.js?worker";
 import { json as monacoJson, typescript as monacoTs } from "monaco-editor";
 import { languageFor, registerTiBasic, tiCatalog } from "./language";
+import { applyIndentation, registerIndentation } from "./indent";
+import { isLight, watchTheme } from "./theme";
 import { TARGETS, getTarget, onTargetChange, setTarget } from "./target";
 import { C_CATALOG } from "./c-support";
 import { PY_CATALOG, watchPython } from "./py2ez80-support";
@@ -14,7 +16,7 @@ import { ASM_CATALOG, ASM_LANG } from "./asm-support";
 import { appVersion, checkForUpdate } from "./updater";
 import { createScm } from "./scm";
 import { showMenu, type MenuItem } from "./menu";
-import { SEND_TYPES, createCalc, unbundle } from "./calc";
+import { SEND_TYPES, TREE_DRAG, createCalc, unbundle } from "./calc";
 import { ENCODINGS, canSave, decodeWith, detect, encode, encodingByKey, encodingKey, type Encoding } from "./encoding";
 import { hexDump, parseTiFile } from "./tifile";
 import { onSettingsChange, projectSettings, resetSettings, setProjectSettings, setSetting, settings, settingsPage, type Row } from "./settings";
@@ -105,7 +107,13 @@ function h<K extends keyof HTMLElementTagNameMap>(
 
 // ── State ──────────────────────────────────────────────────────────────────
 
-const docsView = createDocs($("docs"), () => { if (activeDoc()) editor.focus(); });
+// The docs page is a tab: its view is this element, moved into the view host when it shows.
+const docsEl = $("docs");
+docsEl.remove();
+docsEl.hidden = false;
+const docsView = createDocs(docsEl);
+/** The docs tab's id. */
+const DOCS_TAB = "view:docs";
 
 // The calculator's console lines also go to the Console tab under the editor. The calculator starts
 // before that panel exists, so its first lines wait here.
@@ -122,7 +130,6 @@ const calc = createCalc({
     // and it has its own tab: showing it opens the tab, hiding it while its tab is active closes the tab.
     $("act-calc").setAttribute("aria-pressed", String(calc.visible));
     if (calc.visible) {
-      docsView.close();
       if (active !== CALC_TAB) {
         views.set(CALC_TAB, { id: CALC_TAB, label: "Calculator", hint: "The TI-84 Plus CE emulator", el: h("div") });
         if (!tabOrder.includes(CALC_TAB)) tabOrder.push(CALC_TAB);
@@ -156,6 +163,8 @@ const scm = createScm({
 // TI-BASIC's highlighting is TIde's own; the IntelliSense for every language comes from the built-in
 // CE Languages extension, which starts below.
 registerTiBasic();
+registerIndentation();
+watchTheme();
 
 // The calculator shows a ":" before every line. It is a gutter, not file content, so saved programs stay clean.
 const GUTTER_PREF = "tide-pref-numbers"; // must not start with "tide:" or the browser store lists it as a program
@@ -172,7 +181,7 @@ function gutterOptions(): Pick<monaco.editor.IEditorOptions, "lineNumbers" | "li
 
 const editor = monaco.editor.create($("editor"), {
   model: null,
-  theme: "tide",
+  theme: isLight() ? "tide-light" : "tide",
   automaticLayout: true,
   fontSize: settings().fontSize,
   lineHeight: Math.round(settings().fontSize * 1.7),
@@ -196,6 +205,8 @@ const editor = monaco.editor.create($("editor"), {
   overviewRulerLanes: 0,
   contextmenu: false,
   padding: { top: 10 },
+  // Files dropped on the editor open in tabs (setUpDragging), rather than going into the text.
+  dropIntoEditor: { enabled: false },
 });
 
 const docs = new Map<string, Doc>();
@@ -204,6 +215,8 @@ const views = new Map<string, View>();
 const CALC_TAB = "view:calculator";
 let tabOrder: string[] = [];
 let active: string | null = null;
+/** The last file or program tab shown, which the docs tab follows. */
+let lastDocTab: string | null = null;
 let names: string[] = [];
 
 // Build state: tokenize errors per program name, so the list can flag ones that won't build.
@@ -293,13 +306,11 @@ function addDoc(init: Pick<Doc, "id" | "label" | "hint" | "language" | "write"> 
     model, savedVersion: model.getAlternativeVersionId(), write: init.write,
   };
   docs.set(doc.id, doc);
-  model.onDidChangeContent(refresh);
+  model.onDidChangeContent(() => { refresh(); autoSaveSoon(doc); });
+  // Each file keeps the indentation it has: tabs or spaces, in its own steps (indent.ts).
+  applyIndentation(model, doc.label, doc.language, settings().tabSize);
   if (doc.language === "tibasic") watchModel(model);
-  else {
-    // Assembly lines up with tabs; everything else uses four spaces.
-    model.updateOptions(doc.language === ASM_LANG ? { tabSize: 8, insertSpaces: false } : { tabSize: settings().tabSize, insertSpaces: true });
-    if (doc.language === "python") watchPython(model);
-  }
+  else if (doc.language === "python") watchPython(model);
   return doc;
 }
 
@@ -308,7 +319,7 @@ function activate(id: string, note?: string) {
   if (!doc && !view) return;
   if (!tabOrder.includes(id)) tabOrder.push(id);
   active = id;
-  docsView.close();
+  if (doc) lastDocTab = id;
   if (id === CALC_TAB) void calc.show();
   else if (calc.visible) calc.hide();
   showActive();
@@ -367,9 +378,20 @@ async function openFile(entry: Entry) {
 /** Opens a project file as text in an encoding, saving it back in the same encoding. */
 function openText(entry: Entry, text: string, encoding: Encoding) {
   const id = fileId(entry.path);
+  let path = entry.path;
   const doc = addDoc({
     id, label: entry.name, hint: entry.path, language: languageFor(entry.name), source: text,
-    write: s => fs.writeBinary(entry.path, encode(s, docs.get(id)!.encoding!)),
+    async write(s) {
+      // A file dropped from outside has nowhere to go back to: the first save asks where.
+      if (path.startsWith(DROPPED)) {
+        const ext = entry.name.includes(".") ? extOf(entry.name) : "";
+        const to = await fs.pickSaveFile(entry.name, { name: ext ? `.${ext} file` : "File", extensions: ext ? [ext] : ["*"] });
+        if (!to) throw new Error("no place was chosen");
+        path = to;
+        docs.get(id)!.hint = to;
+      }
+      await fs.writeBinary(path, encode(s, docs.get(id)!.encoding!));
+    },
   });
   doc.encoding = encoding;
   activate(id);
@@ -472,7 +494,6 @@ async function tiFileView(entry: Entry, bytes: Uint8Array): Promise<View> {
 // ── The panel under the editor: Output (build, prerun, postrun and script logs) and Terminal ──
 const panel = createPanel({
   available: fs.desktop,
-  runShell: (dir, line, onOutput) => fs.runShell(dir, line, onOutput),
   homeDir: () => fs.homeDir(),
   projectRoot: () => project?.root ?? null,
   say: setMessage,
@@ -628,12 +649,14 @@ function openSettings() {
 
 function settingRows(): Row[] {
   const s = settings();
-  const toggle = (key: "wordWrap" | "minimap" | "showRuler" | "sendClibs" | "checkUpdates" | "refreshScmOnFocus" | "shiftDeletes") =>
+  const toggle = (key: "wordWrap" | "minimap" | "showRuler" | "sendClibs" | "checkUpdates" | "refreshScmOnFocus" | "shiftDeletes" | "autoSave") =>
     ({ kind: "toggle" as const, get: () => settings()[key], set: (v: boolean) => setSetting(key, v) });
   const keyOf: Record<string, string> = { "Font size": "fontSize", "Tab size": "tabSize", "Word wrap": "wordWrap", Minimap: "minimap",
     "Show whitespace": "renderWhitespace", "Screen width ruler": "showRuler", "Encoding for other text": "fallbackEncoding",
     "Send clibs.8xg with C projects": "sendClibs" };
   const rows: Row[] = [
+    { section: "Appearance", label: "Theme", description: "Dark or light mode, or whichever your system uses.",
+      control: { kind: "select", options: [["dark", "Dark"], ["light", "Light"], ["system", "Same as the system"]], get: () => s.theme, set: v => setSetting("theme", v as "dark" | "light" | "system") } },
     { section: "Editor", label: "Font size", description: "Size of text in the editor, in pixels.",
       control: { kind: "number", min: 9, max: 28, get: () => s.fontSize, set: v => setSetting("fontSize", v) } },
     { section: "Editor", label: "Tab size", description: "Spaces per indent in C, Python and other files. Assembly always uses tabs.",
@@ -653,6 +676,7 @@ function settingRows(): Row[] {
       control: { kind: "select", options: ENCODINGS.filter(e => !e.bom && e.id !== "utf-8").map(e => [encodingKey(e), e.label]),
         get: () => s.fallbackEncoding, set: v => setSetting("fallbackEncoding", v) } },
     { section: "Calculator", label: "Send clibs.8xg with C projects", description: "Send the CE C libraries before running a C project, when TIde finds them.", control: toggle("sendClibs") },
+    { section: "Files", label: "Auto save", description: "Save changed files and programs a second after you stop typing, and when TIde loses focus. Files dropped in from outside still ask where to go on their first save.", control: toggle("autoSave") },
     { section: "Files", label: "Shift for permanent delete", description: "In the Explorer's right-click menu, show one Delete that holding Shift turns into Delete permanently. Off shows both.", control: toggle("shiftDeletes") },
     { section: "Source control", label: "Refresh when TIde gets focus", description: "Check git status again when you switch back to TIde.", control: toggle("refreshScmOnFocus") },
     { section: "Updates", label: "Check for updates on start", description: "Look for a newer TIde when it starts. Desktop app only.", control: toggle("checkUpdates") },
@@ -689,6 +713,30 @@ async function createProgram(name: string) {
     await openProgram(name);
   }
 }
+
+// ── Auto save: changed files and programs save a second after the last change, and when TIde
+// loses focus. Files dropped in from outside are left to a real save, which asks where they go.
+const AUTO_SAVE_MS = 1000;
+const autoSaveTimers = new Map<Doc, number>();
+const autoSavable = (doc: Doc) => settings().autoSave && docs.get(doc.id) === doc && isDirty(doc) && !doc.hint?.startsWith(DROPPED);
+function autoSaveSoon(doc: Doc) {
+  window.clearTimeout(autoSaveTimers.get(doc));
+  autoSaveTimers.delete(doc);
+  if (!autoSavable(doc)) return;
+  autoSaveTimers.set(doc, window.setTimeout(() => {
+    autoSaveTimers.delete(doc);
+    if (autoSavable(doc)) void saveDoc(doc);
+  }, AUTO_SAVE_MS));
+}
+function autoSaveAll() {
+  for (const doc of docs.values()) {
+    window.clearTimeout(autoSaveTimers.get(doc));
+    autoSaveTimers.delete(doc);
+    if (autoSavable(doc)) void saveDoc(doc);
+  }
+}
+window.addEventListener("blur", autoSaveAll);
+document.addEventListener("visibilitychange", () => { if (document.hidden) autoSaveAll(); });
 
 async function saveDoc(doc: Doc): Promise<boolean> {
   let saved = true;
@@ -1057,6 +1105,8 @@ function treeRows(path: string, depth: number, out: HTMLElement[]) {
       h("span", { className: "name" }, entry.name),
     );
     row.style.paddingLeft = `${10 + depth * 14}px`;
+    row.style.setProperty("--depth", String(depth));
+    row.draggable = true;
     row.dataset.path = entry.path;
     row.dataset.dir = String(entry.isDir);
     if (entry.isDir) row.setAttribute("aria-expanded", String(open));
@@ -1107,9 +1157,11 @@ function markOverflow() {
   const cols = screenCols();
   const marks: monaco.editor.IModelDeltaDecoration[] = [];
   doc.model.getLinesContent().forEach((text, i) => {
-    if (text.length < cols) return;
+    // Indentation isn't on the calculator, so the screen's width starts after it.
+    const lead = text.length - text.trimStart().length;
+    if (text.length - lead < cols) return;
     marks.push({
-      range: new monaco.Range(i + 1, cols, i + 1, text.length + 1),
+      range: new monaco.Range(i + 1, lead + cols, i + 1, text.length + 1),
       options: { inlineClassName: "overflow", hoverMessage: { value: "Wraps onto a new row on the calculator." } },
     });
   });
@@ -1118,7 +1170,8 @@ function markOverflow() {
 
 /** Which docs (and inserts) the active tab uses, or null for file types without one. */
 function catalogLang(): DocLangId | null {
-  const language = activeDoc()?.language;
+  // While the docs tab shows, the docs follow the file you came from.
+  const language = (active === DOCS_TAB && lastDocTab ? docs.get(lastDocTab) : activeDoc())?.language;
   if (!language || language === "tibasic") return "tibasic";
   if (language === "python") return "python";
   if (language === ASM_LANG) return "ez80";
@@ -1138,10 +1191,11 @@ function catalogGroups(): { group: string; entries: { name: string; insert: stri
   }
 }
 
-/** Opens the docs page for the active tab's language, at the named entry if given. */
+/** Opens the docs tab for the active tab's language, at the named entry if given. */
 function openDocs(name?: string) {
-  if (calc.visible) calc.hide();
-  docsView.open(catalogLang() ?? undefined, name);
+  const lang = catalogLang() ?? undefined;
+  openView({ id: DOCS_TAB, label: "Docs", hint: "Documentation for TI-BASIC, the C libraries, py2ez80 and eZ80 assembly (Ctrl+Shift+J)", el: docsEl });
+  docsView.open(lang, name);
 }
 
 /** The Docs view: every entry for the active tab's language. Click opens its page; Enter or + inserts it. */
@@ -1381,6 +1435,7 @@ function nameBoxRow(dir: string, kind: "file" | "folder", depth: number): HTMLEl
   const row = h("li", { className: "creating" },
     h("span", { className: "twisty" }, kind === "folder" ? "▸" : ""), input, problem);
   row.style.paddingLeft = `${10 + depth * 14}px`;
+  row.style.setProperty("--depth", String(depth));
   let done = false;
   const finish = async (commit: boolean) => {
     if (done) return;
@@ -1463,6 +1518,227 @@ You can restore it from there.`);
   renderTree();
   void scm.refresh();
   setMessage(permanent ? `Deleted ${name}` : `Moved ${name} to the ${bin}`);
+}
+
+// ── Dragging files ──
+// In the Explorer, files and folders drag onto a folder (or the project's root) to move there, and
+// files and folders dropped from outside are copied in. On the editor, files dropped from outside or
+// dragged from the Explorer open in tabs.
+
+/** Paths of files dropped from outside TIde, which have no place on disk TIde knows. */
+const DROPPED = "dropped:";
+let droppedCount = 0;
+const isInside = (path: string, dir: string) => path === dir || path.startsWith(dir + "\\") || path.startsWith(dir + "/");
+
+/** The folder a drop on `target` goes into, or null where nothing can be dropped. */
+function dropFolder(target: EventTarget | null): string | null {
+  if (!project || !(target instanceof Element)) return null;
+  const row = target.closest<HTMLElement>("#tree [data-path]");
+  if (row) return row.dataset.dir === "true" ? row.dataset.path! : parentOf(row.dataset.path!);
+  return target.closest(".files") && !target.closest("#list, #list-empty, .files > .section:first-child") ? project.root : null;
+}
+
+/** Shows which folder a drop goes into: its row, and the rows inside it. */
+function markDropFolder(dir: string | null) {
+  for (const row of els.tree.querySelectorAll<HTMLElement>(".drop-into")) row.classList.remove("drop-into");
+  els.tree.classList.toggle("drop-root", !!project && dir === project.root);
+  if (!dir || dir === project?.root) return;
+  for (const row of els.tree.querySelectorAll<HTMLElement>("[data-path]")) {
+    if (isInside(row.dataset.path!, dir)) row.classList.add("drop-into");
+  }
+}
+
+/** Moves files and folders into `dir`, keeping their tabs open on the new paths. */
+async function moveInto(paths: string[], dir: string) {
+  const moving = paths.filter(p => parentOf(p) !== dir && !isInside(dir, p));
+  if (!moving.length) return;
+  const tabsIn = (p: string) => tabOrder.filter(id => { const at = docs.get(id)?.hint ?? views.get(id)?.hint; return !!at && id.startsWith("file:") && isInside(at, p); });
+  const unsaved = moving.flatMap(tabsIn).map(id => docs.get(id)).filter((d): d is Doc => !!d && isDirty(d));
+  if (unsaved.length) { setMessage(`Save ${unsaved.map(d => d.label).join(", ")} before moving ${unsaved.length === 1 ? "it" : "them"}.`); return; }
+  const moved: string[] = [];
+  for (const from of moving) {
+    const to = joinPath(dir, baseName(from));
+    try {
+      await fs.movePath(from, to);
+    } catch (err) {
+      setMessage(`Could not move ${baseName(from)}: ${err instanceof Error ? err.message : err}`);
+      continue;
+    }
+    moved.push(from);
+    // Its tabs open again from where it is now, in the same places, and the tab that was showing stays showing.
+    let showing = active;
+    for (const id of tabsIn(from)) {
+      const now = to + id.slice(5).slice(from.length), nowId = fileId(now);
+      const at = tabOrder.indexOf(id);
+      closeTab(id);
+      await openFile({ name: baseName(now), path: now, isDir: false });
+      tabOrder = tabOrder.filter(t => t !== nowId);
+      tabOrder.splice(at, 0, nowId);
+      if (showing === id) showing = nowId;
+    }
+    if (showing && showing !== active && (docs.has(showing) || views.has(showing))) activate(showing);
+    if (targetDir && isInside(targetDir, from)) targetDir = to + targetDir.slice(from.length);
+    for (const key of [...dirCache.keys()]) if (isInside(key, from)) dirCache.delete(key);
+    for (const key of [...expanded]) if (isInside(key, from)) { expanded.delete(key); expanded.add(to + key.slice(from.length)); }
+  }
+  if (!moved.length) return;
+  for (const folder of new Set([dir, ...moved.map(parentOf)])) dirCache.set(folder, await fs.readDir(folder).catch(() => [] as Entry[]));
+  if (dir !== project?.root) expanded.add(dir);
+  renderTree();
+  refresh();
+  void scm.refresh();
+  setMessage(`Moved ${moved.length === 1 ? baseName(moved[0]) : `${moved.length} items`} to ${baseName(dir)}`);
+}
+
+/** Everything in a drop from outside: files, and folders with what's in them, by path inside the drop. */
+async function droppedFiles(data: DataTransfer): Promise<{ path: string; file: File | null }[]> {
+  type FsEntry = { isFile: boolean; isDirectory: boolean; name: string; file?(ok: (f: File) => void, fail: (e: unknown) => void): void;
+    createReader?(): { readEntries(ok: (e: FsEntry[]) => void, fail: (e: unknown) => void): void } };
+  const entries = [...data.items].map(i => (i as DataTransferItem & { webkitGetAsEntry?(): FsEntry | null }).webkitGetAsEntry?.() ?? null);
+  if (!entries.some(Boolean)) return [...data.files].map(file => ({ path: file.name, file }));
+  const out: { path: string; file: File | null }[] = [];
+  const walk = async (entry: FsEntry, at: string): Promise<void> => {
+    const path = at ? `${at}/${entry.name}` : entry.name;
+    if (entry.isFile) { out.push({ path, file: await new Promise<File>((ok, fail) => entry.file!(ok, fail)) }); return; }
+    out.push({ path, file: null });
+    const reader = entry.createReader!();
+    // Readers hand out a folder's entries a batch at a time, then an empty batch.
+    for (;;) {
+      const batch = await new Promise<FsEntry[]>((ok, fail) => reader.readEntries(ok, fail));
+      if (!batch.length) break;
+      for (const child of batch) await walk(child, path);
+    }
+  };
+  for (const entry of entries) if (entry) await walk(entry, "");
+  return out;
+}
+
+/** Copies files and folders dropped from outside into `dir`. */
+async function copyInto(data: DataTransfer, dir: string) {
+  const items = await droppedFiles(data);
+  if (!items.length) return;
+  const tops = [...new Set(items.map(i => i.path.split("/")[0]))];
+  const clash = tops.filter(name => (dirCache.get(dir) ?? []).some(e => e.name.toLowerCase() === name.toLowerCase()));
+  if (clash.length && !confirm(`${clash.join(", ")} already ${clash.length === 1 ? "exists" : "exist"} in ${baseName(dir)}. Replace ${clash.length === 1 ? "it" : "them"}?`)) return;
+  try {
+    for (const item of items) {
+      const to = joinPath(dir, item.path);
+      if (item.file) await fs.writeBinary(to, new Uint8Array(await item.file.arrayBuffer()));
+      else await fs.createDir(to);
+    }
+  } catch (err) {
+    setMessage(`Could not copy everything in: ${err instanceof Error ? err.message : err}`);
+  }
+  for (const key of [...dirCache.keys()]) if (isInside(key, dir)) dirCache.set(key, await fs.readDir(key).catch(() => [] as Entry[]));
+  if (dir !== project?.root) expanded.add(dir);
+  renderTree();
+  void scm.refresh();
+  setMessage(`Copied ${tops.length === 1 ? tops[0] : `${tops.length} items`} into ${baseName(dir)}`);
+}
+
+/** Opens a file dropped from outside TIde in a tab. Saving it asks where. */
+async function openDropped(file: File) {
+  const bytes = new Uint8Array(await file.arrayBuffer());
+  const entry: Entry = { name: file.name, path: `${DROPPED}${++droppedCount}/${file.name}`, isDir: false };
+  if (SEND_TYPES.includes(extOf(file.name))) return openView(await tiFileView(entry, bytes));
+  const found = detect(bytes, encodingByKey(settings().fallbackEncoding) ?? ENCODINGS[4]);
+  if (!found) return openView(unsupportedView(entry, bytes));
+  openText(entry, found.text, found.encoding);
+}
+
+function setUpDragging() {
+  const files = document.querySelector<HTMLElement>("#pane-files .files")!;
+  const fromTree = (e: DragEvent) => e.dataTransfer?.types.includes(TREE_DRAG) ?? false;
+  const fromOutside = (e: DragEvent) => !fromTree(e) && (e.dataTransfer?.types.includes("Files") ?? false);
+  let dragged: string[] = [];
+
+  files.addEventListener("dragstart", e => {
+    const row = (e.target as HTMLElement).closest<HTMLElement>("#tree [data-path]");
+    if (!row || !e.dataTransfer) return;
+    dragged = [row.dataset.path!];
+    e.dataTransfer.setData(TREE_DRAG, dragged.join("\n"));
+    e.dataTransfer.setData("text/plain", dragged.join("\n"));
+    e.dataTransfer.effectAllowed = "copyMove";
+    row.classList.add("dragging");
+  });
+  files.addEventListener("dragend", () => {
+    dragged = [];
+    markDropFolder(null);
+    for (const row of els.tree.querySelectorAll(".dragging")) row.classList.remove("dragging");
+  });
+  // Hovering a closed folder for a moment opens it, so a drag can go deeper.
+  let hover: { dir: string; timer: number } | null = null;
+  files.addEventListener("dragover", e => {
+    if (!fromTree(e) && !fromOutside(e)) return;
+    const dir = dropFolder(e.target);
+    const ok = !!dir && (fromOutside(e) || !dragged.some(p => isInside(dir, p) || parentOf(p) === dir));
+    markDropFolder(ok ? dir : null);
+    if (!ok) return;
+    e.preventDefault();
+    e.dataTransfer!.dropEffect = fromTree(e) ? "move" : "copy";
+    const row = (e.target as HTMLElement).closest<HTMLElement>("#tree [data-path]");
+    const closed = row?.dataset.dir === "true" && !expanded.has(row.dataset.path!) ? row.dataset.path! : null;
+    if (hover?.dir !== closed) {
+      if (hover) window.clearTimeout(hover.timer);
+      hover = closed ? { dir: closed, timer: window.setTimeout(() => void toggleDir({ name: baseName(closed), path: closed, isDir: true }), 700) } : null;
+    }
+  });
+  files.addEventListener("dragleave", e => {
+    if (files.contains(e.relatedTarget as Node | null)) return;
+    markDropFolder(null);
+    if (hover) { window.clearTimeout(hover.timer); hover = null; }
+  });
+  files.addEventListener("drop", e => {
+    const dir = dropFolder(e.target);
+    markDropFolder(null);
+    if (hover) { window.clearTimeout(hover.timer); hover = null; }
+    if (!dir || !e.dataTransfer) return;
+    e.preventDefault();
+    e.stopPropagation();
+    if (fromTree(e)) void moveInto(e.dataTransfer.getData(TREE_DRAG).split("\n").filter(Boolean), dir);
+    else if (fromOutside(e)) void copyInto(e.dataTransfer, dir);
+  });
+
+  // The editor opens what's dropped on it.
+  const stage = document.querySelector<HTMLElement>(".stage")!;
+  stage.addEventListener("dragover", e => {
+    if (!fromTree(e) && !fromOutside(e)) return;
+    e.preventDefault();
+    e.dataTransfer!.dropEffect = fromTree(e) ? "link" : "copy";
+    stage.classList.add("drop-open");
+  });
+  stage.addEventListener("dragleave", e => { if (!stage.contains(e.relatedTarget as Node | null)) stage.classList.remove("drop-open"); });
+  stage.addEventListener("drop", e => {
+    stage.classList.remove("drop-open");
+    if (!e.dataTransfer) return;
+    e.preventDefault();
+    if (fromTree(e)) {
+      for (const path of e.dataTransfer.getData(TREE_DRAG).split("\n").filter(Boolean)) {
+        const entry = [...dirCache.values()].flat().find(x => x.path === path);
+        if (entry?.isDir) void toggleDir(entry);
+        else void openFile({ name: baseName(path), path, isDir: false });
+      }
+    } else {
+      for (const file of [...e.dataTransfer.files].filter(f => !/\.tideex$/i.test(f.name))) {
+        void openDropped(file).catch(err => setMessage(`Can't open ${file.name}: ${err}`));
+      }
+    }
+  });
+  stage.addEventListener("dragend", () => stage.classList.remove("drop-open"));
+  document.addEventListener("dragend", () => stage.classList.remove("drop-open"));
+
+  // Files dropped anywhere else must not replace the page with themselves.
+  window.addEventListener("dragover", e => { if (fromOutside(e)) e.preventDefault(); });
+  window.addEventListener("drop", e => {
+    if (!e.dataTransfer?.files.length) return;
+    e.preventDefault();
+    // .TIdeex files install wherever they're dropped, except into the Explorer, which copies them.
+    if (fs.desktop && !(e.target instanceof Element && e.target.closest("#pane-files .files"))) {
+      for (const file of [...e.dataTransfer.files].filter(f => /\.tideex$/i.test(f.name))) {
+        void file.arrayBuffer().then(b => extensionsView.install({ name: file.name, bytes: new Uint8Array(b) }));
+      }
+    }
+  }, true);
 }
 
 /** Delete items for the Explorer menu: one that Shift turns permanent, or both, by the setting. */
@@ -1574,6 +1850,7 @@ function editorMenu(position: monaco.IPosition | null): MenuItem[] {
     { label: "Select all", shortcut: "Ctrl+A", run: act("editor.action.selectAll") },
     "-",
     { label: "Toggle comment", shortcut: "Ctrl+/", run: act("editor.action.commentLine") },
+    { label: "Format document", shortcut: "Shift+Alt+F", disabled: !["tibasic", "c", "cpp", "python", ASM_LANG].includes(doc.language), run: act("editor.action.formatDocument") },
     ...(doc.language === "tibasic" ? [{ label: "Go to label", shortcut: "F12", run: act("editor.action.revealDefinition") }] : []),
     ...(hasDocs ? [{ label: `Docs for ${word}`, run: () => {
       const name = DOCS.find(d => d.id === lang)!.groups.flatMap(g => g.entries).find(e => e.name === word || e.name === `${word}(`)!.name;
@@ -1657,12 +1934,23 @@ $("file-menu").addEventListener("click", e => {
     "-",
     { label: "Save", shortcut: "Ctrl+S", disabled: !doc, run: () => void saveActive() },
     { label: "Save all", disabled: ![...docs.values()].some(isDirty), run: () => { for (const d of docs.values()) if (isDirty(d)) void saveDoc(d); } },
+    { label: "Auto save", checked: settings().autoSave, run: () => {
+      const on = !settings().autoSave;
+      setSetting("autoSave", on);
+      if (projectSettings().autoSave !== undefined && projectSettings().autoSave !== on) setMessage(`This project's tide.json turns auto save ${projectSettings().autoSave ? "on" : "off"}, which wins while it's open.`);
+      else setMessage(on ? "Auto save is on" : "Auto save is off");
+      if (settings().autoSave) autoSaveAll();
+    } },
     "-",
     { label: usesMake() ? "Build" : "Build .8xp", shortcut: "Ctrl+E", disabled: els.exportBtn.hidden, run: () => void exportActive() },
     { label: "Build to…", shortcut: "Ctrl+Shift+E", disabled: !doc || usesMake() || doc.language !== "tibasic", run: () => void exportActive(true) },
     { label: "Run in calculator", shortcut: "F5", disabled: els.run.hidden, run: () => void runInEmulator() },
     "-",
     { label: "Project settings (.tide/tide.json)", disabled: !project, run: () => void openProjectFile() },
+    { label: "Light mode", checked: isLight(), run: () => {
+      setSetting("theme", isLight() ? "dark" : "light");
+      if (projectSettings().theme) setMessage(`This project's tide.json sets the ${projectSettings().theme} theme, which wins while it's open.`);
+    } },
     { label: "Settings", shortcut: "Ctrl+,", run: openSettings },
     { label: "Extensions", shortcut: "Ctrl+Shift+X", run: () => showPane("ext") },
     { label: "Terminal", shortcut: "Ctrl+`", run: () => panel.show("terminal", true) },
@@ -1687,7 +1975,7 @@ onSettingsChange(s => {
     fontSize: s.fontSize, lineHeight: Math.round(s.fontSize * 1.7), wordWrap: s.wordWrap ? "on" : "off",
     minimap: { enabled: s.minimap }, renderWhitespace: s.renderWhitespace,
   });
-  for (const doc of docs.values()) if (doc.language !== ASM_LANG && doc.language !== "tibasic") doc.model.updateOptions({ tabSize: s.tabSize });
+  for (const doc of docs.values()) applyIndentation(doc.model, doc.label, doc.language, s.tabSize);
   applyEditorMode();
   emit("settings", s);
 });
@@ -1718,7 +2006,7 @@ window.addEventListener("keydown", e => {
   else if (key === "e") { e.preventDefault(); void exportActive(); }
   else if (key === "w" && active) { e.preventDefault(); closeTab(active); }
   else if (key === "n") { e.preventDefault(); showPane("files"); els.find.focus(); }
-  else if (e.shiftKey && key === "j") { e.preventDefault(); if (docsView.isOpen) docsView.close(); else openDocs(); }
+  else if (e.shiftKey && key === "j") { e.preventDefault(); if (active === DOCS_TAB) closeTab(DOCS_TAB); else openDocs(); }
   else if (key === "j") { e.preventDefault(); showPane("docs"); els.docFind.select(); }
   else if (key === "b") { e.preventDefault(); showPane(pane, true); }
   else if (e.shiftKey && key === "g") { e.preventDefault(); showPane("scm"); }
@@ -1805,11 +2093,9 @@ if (fs.desktop) {
   const installOpened = () => fs.takeOpenedFiles().then(paths => { for (const p of paths) void extensionsView.install(p); });
   void extensionsReady.then(installOpened);
   import("@tauri-apps/api/event").then(({ listen }) => listen("tide://opened-files", () => void extensionsReady.then(installOpened))).catch(() => {});
-  import("@tauri-apps/api/webview").then(({ getCurrentWebview }) => getCurrentWebview().onDragDropEvent(e => {
-    if (e.payload.type !== "drop") return;
-    for (const p of e.payload.paths.filter(p => /\.tideex$/i.test(p))) void extensionsView.install(p);
-  })).catch(() => { /* not in the desktop app */ });
+  // Dropped ones install from setUpDragging's drop handler.
 }
+setUpDragging();
 if (fs.desktop) appVersion().then(v => { extensionHost.version = v; }).catch(() => { /* stays "dev" */ });
 
 // Reopen the last project folder, quietly: if it moved or was deleted, just start empty.

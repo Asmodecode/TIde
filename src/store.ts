@@ -101,6 +101,8 @@ export interface Fs {
   /** .TIdeex files TIde was opened with, since this was last asked. */
   takeOpenedFiles(): Promise<string[]>;
   deletePath(path: string, permanent: boolean): Promise<void>;
+  /** Moves a file or folder to `to` (its new full path), which mustn't exist yet. */
+  movePath(from: string, to: string): Promise<void>;
   git: Git;
   emulator: Emulator;
 }
@@ -194,6 +196,7 @@ export const fs: Fs = isTauri
       revealExtension: path => invoke<void>("reveal_extension", { path: path ?? null }),
       takeOpenedFiles: () => invoke<string[]>("take_opened_files"),
       deletePath: (path, permanent) => invoke<void>("delete_path", { path, permanent }),
+      movePath: (from, to) => invoke<void>("move_path", { from, to }),
       runCommand: (dir, command, args) => invoke<{ ok: boolean; output: string }>("run_command", { dir, command, args }),
       runShell,
       watchFolder: path => invoke<void>("watch_folder", { path }),
@@ -241,6 +244,7 @@ export const fs: Fs = isTauri
       revealExtension: desktopOnly,
       takeOpenedFiles: async () => [],
       deletePath: path => webFs.deletePath(path),
+      movePath: webFs.movePath,
       emulator: { status: async () => null, install: desktopOnly, stage: desktopOnly, run: desktopOnly },
       git: { status: desktopOnly, stage: desktopOnly, unstage: desktopOnly, commit: desktopOnly, push: desktopOnly, pull: desktopOnly, init: desktopOnly },
     };

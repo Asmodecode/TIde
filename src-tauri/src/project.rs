@@ -82,6 +82,41 @@ pub fn delete_path(path: String, permanent: bool) -> Result<(), String> {
     if p.is_dir() { fs::remove_dir_all(p) } else { fs::remove_file(p) }.map_err(|e| e.to_string())
 }
 
+/// Moves (or renames) a file or folder to `to`, which mustn't exist yet. Across drives, where a
+/// rename can't, it copies and then deletes the original.
+#[tauri::command(async)]
+pub fn move_path(from: String, to: String) -> Result<(), String> {
+    let (src, dst) = (std::path::Path::new(&from), std::path::Path::new(&to));
+    if !src.exists() {
+        return Err(format!("{from} doesn't exist."));
+    }
+    if dst.exists() {
+        let name = dst.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or(to.clone());
+        return Err(format!("{name} already exists there."));
+    }
+    if dst.starts_with(src) {
+        return Err("A folder can't go inside itself.".into());
+    }
+    if fs::rename(src, dst).is_ok() {
+        return Ok(());
+    }
+    copy_all(src, dst).map_err(|e| e.to_string())?;
+    if src.is_dir() { fs::remove_dir_all(src) } else { fs::remove_file(src) }.map_err(|e| e.to_string())
+}
+
+fn copy_all(src: &std::path::Path, dst: &std::path::Path) -> std::io::Result<()> {
+    if src.is_dir() {
+        fs::create_dir_all(dst)?;
+        for entry in fs::read_dir(src)? {
+            let entry = entry?;
+            copy_all(&entry.path(), &dst.join(entry.file_name()))?;
+        }
+        Ok(())
+    } else {
+        fs::copy(src, dst).map(|_| ())
+    }
+}
+
 /// Creates a folder (and any missing parents), for New folder in the Explorer.
 #[tauri::command]
 pub fn create_dir(path: String) -> Result<(), String> {

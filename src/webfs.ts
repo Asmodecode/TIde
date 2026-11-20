@@ -200,6 +200,20 @@ export const webFs = {
     const parent = await dirAt(`/${parts.slice(0, -1).join("/")}`);
     await parent.removeEntry(parts[parts.length - 1], { recursive: true });
   },
+  /** Moves a file or folder to `to`, which mustn't exist yet: a copy, then the original deleted. */
+  async movePath(from: string, to: string) {
+    const exists = (p: string) => fileAt(p).then(() => true, () => dirAt(p).then(() => true, () => false));
+    if (await exists(to)) throw new Error(`${split(to).pop()} already exists there.`);
+    if (`${to}/`.startsWith(`${from}/`)) throw new Error("A folder can't go inside itself.");
+    const copy = async (src: string, dst: string) => {
+      const isDir = await dirAt(src).then(() => true, () => false);
+      if (!isDir) return writeBytes(dst, await readBytes(src));
+      await dirAt(dst, true);
+      for (const entry of await webFs.readDir(src)) await copy(entry.path, `${dst}/${entry.name}`);
+    };
+    await copy(from, to);
+    await webFs.deletePath(from);
+  },
   pickFile: async (_label: string, extensions: string[]) => (await choose(extensions, false))[0] ?? null,
   pickFiles: (_label: string, extensions: string[]) => choose(extensions, true),
   /** A save dialog where the browser has one; otherwise the file downloads when it's written. */

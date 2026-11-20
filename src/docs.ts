@@ -1,5 +1,5 @@
-// The docs page: full documentation for every catalog, one language at a time. It covers the
-// editor area and is built from the same tables as the catalogs, so the two never disagree.
+// The docs page: full documentation for every catalog, one language at a time, in a tab of its own
+// (main.ts). It's built from the same tables as the catalogs, so the two never disagree.
 import { BLOCKS, COMMANDS, usage, type Command } from "./commands";
 import { OTHER_COMMANDS, SYMBOL_ENTRIES, isCeOnly } from "./language";
 import { TI_CATEGORIES } from "./ti-docs";
@@ -71,17 +71,19 @@ function rich(text: string): (Node | string)[] {
   return text.split(/`([^`]+)`/).map((part, i) => (i % 2 ? el("code", {}, part) : part));
 }
 
-export interface DocsView { open(lang?: DocLangId, name?: string): void; close(): void; readonly isOpen: boolean }
+export interface DocsView {
+  /** Shows a language's page, at the named entry if given. `root` must be on the page already. */
+  open(lang?: DocLangId, name?: string): void;
+}
 
-/** Builds the docs page inside `root`. `onClose` runs when the user closes it. */
-export function createDocs(root: HTMLElement, onClose: () => void): DocsView {
+/** Builds the docs page inside `root`. */
+export function createDocs(root: HTMLElement): DocsView {
   let lang: DocLangId = "tibasic";
   const tabs = el("div", { className: "docs-langs", role: "tablist" });
   const search = el("input", { type: "search", placeholder: "Search these docs…", spellcheck: false });
   const jump = el("select", { title: "Jump to a section" });
-  const close = el("button", { type: "button", className: "docs-close", title: "Close (Esc)" }, "×");
   const body = el("div", { className: "docs-body", tabIndex: -1 });
-  root.replaceChildren(el("div", { className: "docs-head" }, tabs, el("div", { className: "docs-tools" }, search, jump, close)), body);
+  root.replaceChildren(el("div", { className: "docs-head" }, tabs, el("div", { className: "docs-tools" }, search, jump)), body);
 
   function render() {
     const page = DOCS.find(l => l.id === lang)!;
@@ -118,17 +120,11 @@ export function createDocs(root: HTMLElement, onClose: () => void): DocsView {
     document.getElementById(`docs-${jump.value}`)?.scrollIntoView({ block: "start" });
     jump.value = "";
   });
-  close.addEventListener("click", () => view.close());
-  root.addEventListener("keydown", e => {
-    if (e.key === "Escape" && !(e.target === search && search.value)) { e.preventDefault(); view.close(); }
-  });
 
   const view: DocsView = {
-    get isOpen() { return !root.hidden; },
     open(to, name) {
       if (to) lang = to;
       search.value = "";
-      root.hidden = false;
       render();
       const target = name ? document.getElementById(`docs-${lang}-${slug(name)}`) : null;
       if (target) {
@@ -140,11 +136,6 @@ export function createDocs(root: HTMLElement, onClose: () => void): DocsView {
         body.scrollTop = 0;
         search.focus();
       }
-    },
-    close() {
-      if (root.hidden) return;
-      root.hidden = true;
-      onClose();
     },
   };
   return view;

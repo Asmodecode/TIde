@@ -3,6 +3,14 @@
   <head>
     <meta charset="UTF-8" />
     <title>TIde</title>
+    <script>
+      // Light or dark before anything is drawn, so the page doesn't flash the other one (theme.ts keeps it up to date).
+      try {
+        const theme = JSON.parse(localStorage.getItem("tide-pref-settings") || "{}").theme || "dark";
+        const light = theme === "light" || (theme === "system" && matchMedia("(prefers-color-scheme: light)").matches);
+        document.documentElement.dataset.theme = light ? "light" : "dark";
+      } catch { /* storage unavailable: dark */ }
+    </script>
     <link rel="stylesheet" href="/src/style.css" />
   </head>
   <body>
@@ -98,6 +106,8 @@
             <div class="calc-setup" id="calc-setup" hidden>
               <p id="calc-setup-text"></p>
               <button id="calc-rom" type="button" hidden>Choose ROM…</button>
+              <button id="calc-connect" type="button" hidden>Connect…</button>
+              <button id="calc-disconnect" type="button" class="quiet" hidden>Disconnect</button>
             </div>
             <div class="calc-body" id="calc-screen">
               <div class="calc-lcd-area" id="calc-lcd-area">
@@ -105,7 +115,7 @@
               </div>
               <div class="calc-keypad" id="calc-keypad"></div>
             </div>
-            <p class="hint calc-credit">Drop TI files here to send them. Emulation by <a id="calc-credit" href="https://github.com/CE-Programming/CEmu" target="_blank" rel="noreferrer">CEmu</a> (<span id="calc-license">GPLv3</span>).</p>
+            <p class="hint calc-credit">Drop TI files here to send them. <span id="calc-credit-what">Emulation</span> by <a id="calc-credit" href="https://github.com/CE-Programming/CEmu" target="_blank" rel="noreferrer">CEmu</a> (<span id="calc-license">GPLv3</span>).</p>
             <div class="calc-drop" id="calc-drop" hidden>Drop to send to the calculator</div>
           </div>
           <div class="empty" id="empty">
@@ -118,10 +128,11 @@
           <div class="panel-resize" id="panel-resize" title="Drag to resize"></div>
           <div class="panel-head" role="tablist">
             <button id="panel-tab-output" type="button" role="tab" title="Build, prerun, postrun and script logs (Ctrl+Shift+U)">Output</button>
-            <button id="panel-tab-terminal" type="button" role="tab" title="Command lines in the system shell (Ctrl+`)">Terminal</button>
+            <button id="panel-tab-terminal" type="button" role="tab" title="Your shell, in the open folder (Ctrl+`)">Terminal</button>
             <button id="panel-tab-console" type="button" role="tab" title="The calculator's console: dbg_printf from C programs and emulator messages">Console</button>
             <span class="panel-spacer"></span>
             <button id="panel-stop" type="button" class="panel-icon" title="Stop what's running" hidden>■ Stop</button>
+            <button id="panel-new-terminal" type="button" class="panel-icon" title="End this shell and start a new one in the open folder" hidden>+ New terminal</button>
             <button id="panel-clear" type="button" class="panel-icon" title="Clear">Clear</button>
             <button id="panel-close" type="button" class="panel-icon" title="Close the panel" aria-label="Close the panel">×</button>
           </div>
@@ -166,6 +177,8 @@
         <button id="update-install" type="button" class="primary">Update and restart</button>
       </div>
     </dialog>
+    <!-- Cross-origin isolation, for the calculator link's threads (see the file). -->
+    <script src="isolate.js"></script>
     <script type="module" src="/src/main.ts"></script>
   </body>
 </html>

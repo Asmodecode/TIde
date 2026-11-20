@@ -12,11 +12,15 @@ export interface Settings {
   checkUpdates: boolean;
   refreshScmOnFocus: boolean;
   shiftDeletes: boolean;
+  /** Saves changed files and programs a moment after you stop typing, and when TIde loses focus. */
+  autoSave: boolean;
+  /** Dark, light, or whichever the system uses. */
+  theme: "dark" | "light" | "system";
 }
 
 const DEFAULTS: Settings = {
   fontSize: 13, tabSize: 4, wordWrap: false, minimap: false, renderWhitespace: "none", showRuler: true,
-  fallbackEncoding: "windows-1252", sendClibs: true, checkUpdates: true, refreshScmOnFocus: true, shiftDeletes: true,
+  fallbackEncoding: "windows-1252", sendClibs: true, checkUpdates: true, refreshScmOnFocus: true, shiftDeletes: true, autoSave: false, theme: "dark",
 };
 const PREF = "tide-pref-settings"; // not "tide:", which the browser store treats as a program
 

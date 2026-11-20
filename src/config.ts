@@ -96,6 +96,8 @@ export const CONFIG_SCHEMA = {
         showRuler: { type: "boolean", description: "Mark the TI-BASIC screen width." },
         fallbackEncoding: { type: "string", description: "Encoding for text that isn't UTF-8 or UTF-16, such as \"windows-1252\"." },
         sendClibs: { type: "boolean", description: "Send clibs.8xg with C projects." },
+        autoSave: { type: "boolean", description: "Save changed files a moment after you stop typing." },
+        theme: { enum: ["dark", "light", "system"], description: "Dark or light mode, or whichever the system uses." },
       },
     },
   },

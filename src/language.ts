@@ -117,6 +117,13 @@ export function registerTiBasic(): void {
     wordPattern: /[A-Za-zθ0-9]+/g,
     autoClosingPairs: [{ open: "(", close: ")" }, { open: "{", close: "}" }, { open: '"', close: '"', notIn: ["string"] }],
     comments: { lineComment: ':"' },
+    // A line that opens a block (Then, Else, For(, While or Repeat, not closed again on the line
+    // with End) indents the next one; End and Else go back out as they're typed. The indentation is
+    // only for reading: a build leaves it out (build.ts).
+    indentationRules: {
+      increaseIndentPattern: /^(?!.*:\s*End\s*$)(?:.*:)?\s*(?:Then|Else|For\(|While\b|Repeat\b)[^:]*$/,
+      decreaseIndentPattern: /^\s*:?\s*(?:End|Else)\b/,
+    },
   });
 
   // Matches the app's navy; the colors are the TIde waves plus a few calm accents for syntax.
@@ -165,6 +172,54 @@ export function registerTiBasic(): void {
       "editorWarning.foreground": "#f5a524",
       "scrollbarSlider.background": "#2a457980",
       "scrollbarSlider.hoverBackground": "#2a4579",
+    },
+  });
+
+  // Light mode: the same roles in deeper colors, readable on white.
+  monaco.editor.defineTheme("tide-light", {
+    base: "vs",
+    inherit: false,
+    rules: [
+      { token: "", foreground: "1a2436" },
+      { token: "comment", foreground: "6a7a96", fontStyle: "italic" },
+      { token: "string", foreground: "15803d" },
+      { token: "number", foreground: "b45309" },
+      { token: "operator", foreground: "0369a1" },
+      { token: "keyword.control", foreground: "1d4ed8", fontStyle: "bold" },
+      { token: "keyword.io", foreground: "7c3aed" },
+      { token: "support.function", foreground: "0f766e" },
+      { token: "variable", foreground: "1a2436" },
+      { token: "delimiter", foreground: "5a6883" },
+      { token: "keyword", foreground: "1d4ed8", fontStyle: "bold" },
+      { token: "keyword.directive", foreground: "7c3aed", fontStyle: "" },
+      { token: "type", foreground: "0f766e" },
+      { token: "predefined", foreground: "0f766e" },
+      { token: "identifier", foreground: "1a2436" },
+    ],
+    colors: {
+      "editor.background": "#ffffff",
+      "editor.foreground": "#1a2436",
+      "editor.lineHighlightBackground": "#f1f5fb",
+      "editorLineNumber.foreground": "#9aa7bd",
+      "editorLineNumber.activeForeground": "#1a2436",
+      "editorCursor.foreground": "#0369a1",
+      "editor.selectionBackground": "#bfdcf5",
+      "editor.inactiveSelectionBackground": "#dbe8f5",
+      "editorRuler.foreground": "#e7c98f",
+      "editorIndentGuide.background1": "#e2e8f2",
+      "editorWidget.background": "#f6f8fc",
+      "editorWidget.border": "#d0d9e7",
+      "editorSuggestWidget.background": "#f6f8fc",
+      "editorSuggestWidget.border": "#d0d9e7",
+      "editorSuggestWidget.foreground": "#1a2436",
+      "editorSuggestWidget.selectedBackground": "#dcecfa",
+      "editorSuggestWidget.highlightForeground": "#0369a1",
+      "editorHoverWidget.background": "#f6f8fc",
+      "editorHoverWidget.border": "#d0d9e7",
+      "editorError.foreground": "#dc2626",
+      "editorWarning.foreground": "#b45309",
+      "scrollbarSlider.background": "#c2cddd80",
+      "scrollbarSlider.hoverBackground": "#c2cddd",
     },
   });
 }

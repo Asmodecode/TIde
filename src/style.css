@@ -20,7 +20,37 @@
   --wave-bot: #1e40af;
   --ui: system-ui, -apple-system, "Segoe UI", sans-serif;
   --mono: "Cascadia Code", "JetBrains Mono", "SF Mono", Consolas, monospace;
+  --scroll: #2a4579;
+  --ok: #86d9a8;
+  /* ANSI colors in Output and Console: normal, then bright. */
+  --ansi-0: #4b5563; --ansi-1: #f87171; --ansi-2: #86d9a8; --ansi-3: #f5c07a; --ansi-4: #7dd3fc; --ansi-5: #c4b5fd; --ansi-6: #5eead4; --ansi-7: #e3e9f3;
+  --ansi-8: #8b9cbb; --ansi-9: #fca5a5; --ansi-10: #bbf7d0; --ansi-11: #fde68a; --ansi-12: #bae6fd; --ansi-13: #ddd6fe; --ansi-14: #99f6e4; --ansi-15: #ffffff;
+  --git-m: #f5c07a; --git-a: #86d9a8; --git-r: #7dd3fc; --git-u: #f472b6;
 }
+
+/* Light mode: paper-white editor, pale blue-grey frame, and deeper blues so text stays readable.
+   The status bar keeps the wave colors; the calculator's screen keeps its bezel. */
+:root[data-theme="light"] {
+  color-scheme: light;
+  --navy: #dfe6f1;
+  --panel: #eef2f8;
+  --paper: #ffffff;
+  --body: #e2e8f2;
+  --lcd: #f2f5fa;
+  --ink: #1a2436;
+  --muted: #5a6883;
+  --rule: #d0d9e7;
+  --key: #0369a1;
+  --key-wash: #dcecfa;
+  --warn: #b45309;
+  --danger: #dc2626;
+  --scroll: #c2cddd;
+  --ok: #15803d;
+  --ansi-0: #4b5563; --ansi-1: #dc2626; --ansi-2: #15803d; --ansi-3: #a16207; --ansi-4: #0369a1; --ansi-5: #7c3aed; --ansi-6: #0f766e; --ansi-7: #1a2436;
+  --ansi-8: #6b7280; --ansi-9: #ef4444; --ansi-10: #16a34a; --ansi-11: #ca8a04; --ansi-12: #0284c7; --ansi-13: #8b5cf6; --ansi-14: #0d9488; --ansi-15: #000000;
+  --git-m: #a16207; --git-a: #15803d; --git-r: #0369a1; --git-u: #be185d;
+}
+:root[data-theme="light"] .activity button { color: #64748b; }
 
 * { box-sizing: border-box; margin: 0; padding: 0; }
 html, body { height: 100%; }
@@ -31,6 +61,11 @@ body { font: 13px/1.4 var(--ui); background: var(--body); color: var(--ink); ove
 .app { --side-w: 230px; display: grid; grid-template-columns: 44px var(--side-w) minmax(0, 1fr); grid-template-rows: minmax(0, 1fr) 22px; height: 100%; }
 .app.no-side { --side-w: 0px; }
 .app.no-side .side { display: none; }
+/* Each area keeps its own column, so hiding the side bar leaves the editor in the third one
+   (auto-placed, it would slide into the side bar's empty column). */
+.app > .activity { grid-column: 1; grid-row: 1; }
+.app > .side { grid-column: 2; grid-row: 1; }
+.app > .workspace { grid-column: 3; grid-row: 1; }
 
 .hint { color: var(--muted); font-size: 12px; }
 
@@ -72,6 +107,16 @@ body { font: 13px/1.4 var(--ui); background: var(--body); color: var(--ink); ove
 #list-empty, #tree-empty { padding: 2px 14px 6px; }
 #tree-empty[hidden] { display: none; }
 #tree .twisty { flex: 0 0 12px; color: var(--muted); font-size: 11px; }
+/* Indent guides: a line under each folder's arrow, down through what's inside it. */
+#tree li { position: relative; }
+#tree li::before { content: ""; position: absolute; top: 0; bottom: 0; left: 10px; width: calc(var(--depth, 0) * 14px); pointer-events: none;
+  background: repeating-linear-gradient(90deg, transparent 0 5px, color-mix(in srgb, var(--muted) 35%, transparent) 5px 6px, transparent 6px 14px); }
+#tree:hover li::before { background: repeating-linear-gradient(90deg, transparent 0 5px, color-mix(in srgb, var(--muted) 60%, transparent) 5px 6px, transparent 6px 14px); }
+/* Dragging: the folder a drop goes into, with everything in it, and the project's root. */
+#tree li.dragging { opacity: .5; }
+#tree li.drop-into { background: color-mix(in srgb, var(--key) 14%, transparent); }
+#tree.drop-root { box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--key) 55%, transparent); background: color-mix(in srgb, var(--key) 7%, transparent); }
+.stage.drop-open::after { content: "Drop to open"; position: absolute; inset: 12px; z-index: 5; display: grid; place-items: center; font: 600 16px var(--ui); color: var(--key); background: rgba(7, 16, 39, .72); border: 2px dashed var(--key); border-radius: 10px; pointer-events: none; }
 .project-head { display: flex; align-items: center; gap: 8px; margin-top: 8px; padding-right: 8px; }
 .project-head #project-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .project-head button { font: 11px var(--ui); text-transform: none; letter-spacing: 0; color: var(--key); background: none; border: 0; border-radius: 2px; padding: 2px 4px; cursor: pointer; white-space: nowrap; }
@@ -125,7 +170,7 @@ body { font: 13px/1.4 var(--ui); background: var(--body); color: var(--ink); ove
 .status #problems.has-warnings::before { content: "⚠ "; }
 
 ::-webkit-scrollbar { width: 10px; height: 10px; }
-::-webkit-scrollbar-thumb { background: #2a4579; border: 2px solid var(--panel); border-radius: 5px; }
+::-webkit-scrollbar-thumb { background: var(--scroll); border: 2px solid var(--panel); border-radius: 5px; }
 @media (prefers-reduced-motion: no-preference) { #list li, #tree li, .tab { transition: background .1s; } }
 
 /* Text that runs past the calculator's 26 columns */
@@ -142,8 +187,6 @@ body { font: 13px/1.4 var(--ui); background: var(--body); color: var(--ink); ove
 .docs-tools { display: flex; align-items: center; gap: 6px; flex: 1; min-width: 220px; }
 .docs-tools input { flex: 1; min-width: 0; padding: 5px 8px; font: 13px var(--ui); background: var(--paper); color: var(--ink); border: 1px solid var(--rule); border-radius: 3px; }
 .docs-tools select { font: inherit; font-size: 12px; max-width: 150px; padding: 4px; background: var(--paper); color: var(--ink); border: 1px solid var(--rule); border-radius: 3px; }
-.docs-close { font-size: 16px; line-height: 1; color: var(--muted); background: none; border: 0; border-radius: 3px; padding: 3px 7px; cursor: pointer; }
-.docs-close:hover { color: var(--ink); background: var(--body); }
 .docs-body { flex: 1; overflow-y: auto; padding: 18px 24px 40px; outline: none; }
 .docs-body > * { max-width: 760px; }
 .docs-body h1 { font: 600 20px var(--ui); margin-bottom: 6px; }
@@ -206,7 +249,7 @@ body { font: 13px/1.4 var(--ui); background: var(--body); color: var(--ink); ove
 .scm-files .deleted .name { text-decoration: line-through; color: var(--muted); }
 .scm-files .dir { flex: 1; min-width: 0; font-size: 11.5px; color: var(--muted); overflow: hidden; text-overflow: ellipsis; }
 .scm-files .letter { flex: 0 0 12px; font: 600 11.5px var(--mono); text-align: center; }
-.s-M { color: #f5c07a; } .s-A, .s-untracked { color: #86d9a8; } .s-D { color: var(--danger); } .s-R, .s-C { color: #7dd3fc; } .s-U { color: #f472b6; }
+.s-M { color: var(--git-m); } .s-A, .s-untracked { color: var(--git-a); } .s-D { color: var(--danger); } .s-R, .s-C { color: var(--git-r); } .s-U { color: var(--git-u); }
 .scm-head .act, .scm-files .act { width: 20px; height: 20px; font-size: 15px; line-height: 1; color: var(--ink); background: none; border: 0; border-radius: 2px; cursor: pointer; visibility: hidden; }
 .scm-head:hover .act, .scm-files li:hover .act, .scm-files li:focus-within .act { visibility: visible; }
 .scm-head .act:hover, .scm-files .act:hover { background: var(--key-wash); }
@@ -225,6 +268,9 @@ body { font: 13px/1.4 var(--ui); background: var(--body); color: var(--ink); ove
 .calc-setup { margin: 40px auto; max-width: 420px; padding: 0 16px; display: flex; flex-direction: column; gap: 10px; }
 .calc-setup button { font: inherit; font-size: 13px; font-weight: 600; color: var(--navy); background: var(--key); border: 0; border-radius: 3px; padding: 8px 12px; cursor: pointer; }
 .calc-setup button:disabled { opacity: .5; }
+.calc-setup button.quiet { color: var(--ink); background: var(--body); border: 1px solid var(--rule); font-weight: 400; }
+.calc-setup button.quiet:hover { border-color: var(--key); }
+.calc-setup p { white-space: pre-line; }
 .calc-body { flex: 1; min-height: 0; overflow: auto; display: grid; grid-template-columns: repeat(2, var(--pane-w, 420px)); grid-auto-rows: var(--pane-h, 340px); justify-content: center; align-content: center; gap: 24px; padding: 20px 24px 8px; }
 .calc-body.stacked { grid-template-columns: var(--pane-w, 420px); }
 .calc-lcd-area { display: grid; place-items: center; min-width: 0; }
@@ -250,6 +296,17 @@ body { font: 13px/1.4 var(--ui); background: var(--body); color: var(--ink); ove
 .arrows .key { font-size: clamp(8px, 2.6cqh, 13px); border-radius: 5px; }
 .arrows .key:nth-child(1) { grid-area: 1 / 2; } .arrows .key:nth-child(2) { grid-area: 2 / 1; }
 .arrows .key:nth-child(3) { grid-area: 2 / 3; } .arrows .key:nth-child(4) { grid-area: 3 / 2; }
+/* The keypad in light mode: pale keys with dark labels, the operators in TIde's blue, and 2nd and alpha in their own colors. */
+:root[data-theme="light"] .key { color: var(--ink); background: #ffffff; box-shadow: inset 0 0 0 1px var(--rule), 0 3px 0 #b9c5d8; }
+:root[data-theme="light"] .key:hover { filter: brightness(.96); }
+:root[data-theme="light"] .key:active { box-shadow: inset 0 0 0 1px var(--rule), 0 1px 0 #b9c5d8; }
+:root[data-theme="light"] .key.fn { background: #e6ecf5; }
+:root[data-theme="light"] .key.num { background: #f8fafd; }
+:root[data-theme="light"] .key.op { color: #ffffff; background: #0369a1; box-shadow: 0 3px 0 #024a73; }
+:root[data-theme="light"] .key.second { color: #0b1730; background: #38bdf8; box-shadow: 0 3px 0 #0284c7; }
+:root[data-theme="light"] .key.alpha { color: #0b1730; background: #34d399; box-shadow: 0 3px 0 #059669; }
+:root[data-theme="light"] .bezel { background: #1a2436; box-shadow: inset 0 0 0 1px #2f3d57, 0 8px 24px rgba(26, 36, 54, .18); }
+:root[data-theme="light"] .calc-drop, :root[data-theme="light"] .stage.drop-open::after { background: rgba(255, 255, 255, .86); }
 .calc-console { flex: 0 0 170px; display: flex; flex-direction: column; min-height: 0; border-top: 1px solid var(--rule); background: var(--panel); }
 .calc-console[hidden] { display: none; }
 .calc-console-bar { display: flex; align-items: center; gap: 10px; padding: 4px 10px 4px 16px; font: 11px var(--ui); letter-spacing: .04em; text-transform: uppercase; color: var(--muted); }
@@ -317,7 +374,7 @@ body { font: 13px/1.4 var(--ui); background: var(--body); color: var(--ink); ove
 .output-view button { font: inherit; font-size: 12.5px; color: var(--ink); background: var(--body); border: 1px solid var(--rule); border-radius: 3px; padding: 4px 12px; cursor: pointer; }
 .output-log { flex: 1; min-height: 0; overflow: auto; margin: 0; padding: 10px 14px; font: 12.5px/1.55 var(--mono); white-space: pre-wrap; word-break: break-word; background: var(--lcd); border: 1px solid var(--rule); border-radius: 3px; user-select: text; }
 .output-log .cmd { color: var(--key); }
-.output-log .ok { color: #86d9a8; }
+.output-log .ok { color: var(--ok); }
 .output-log .err { color: var(--warn); }
 .project-head #project-file[hidden] { display: none; }
 
@@ -328,6 +385,7 @@ body { font: 13px/1.4 var(--ui); background: var(--body); color: var(--ink); ove
 .context-menu button kbd { font: 11.5px var(--ui); color: var(--muted); }
 .context-menu button:focus, .context-menu button:hover { outline: none; background: var(--key-wash); }
 .context-menu button:disabled { color: var(--muted); opacity: .55; cursor: default; background: none; }
+.context-menu button i.check { flex: 0 0 12px; margin-right: -16px; font-style: normal; color: var(--key); }
 .context-menu .sep { height: 1px; margin: 4px 6px; background: var(--rule); }
 
 /* Explorer header: File menu and icon buttons */
@@ -392,13 +450,13 @@ body { font: 13px/1.4 var(--ui); background: var(--body); color: var(--ink); ove
 .log { flex: 1; min-height: 0; overflow: auto; padding: 4px 12px 8px; font: 12.5px/1.45 var(--mono); color: var(--ink); background: var(--paper); user-select: text; }
 .log-line { white-space: pre-wrap; word-break: break-all; min-height: 1.45em; }
 .log .cmd { color: var(--key); }
-.log .ok { color: #86d9a8; }
+.log .ok { color: var(--ok); }
 .log .err { color: var(--danger); }
 .log .info { color: var(--muted); }
 .log .input { color: var(--warn); }
-.term-line { display: flex; align-items: center; gap: 8px; padding: 4px 12px 6px; background: var(--paper); border-top: 1px solid var(--rule); font: 12.5px var(--mono); }
-.term-prompt { color: var(--key); white-space: nowrap; }
-.term-input { flex: 1; min-width: 0; font: inherit; color: var(--ink); background: none; border: 0; outline: none; }
+.term-host { flex: 1; min-height: 0; padding: 4px 0 0 12px; background: var(--paper); overflow: hidden; }
+.term-host .xterm { height: 100%; }
+.term-host .xterm-viewport { background: var(--paper) !important; }
 
 /* The status bar's Terminal and Output buttons */
 .status .status-panel { display: inline-flex; align-items: center; gap: 4px; }

@@ -5,7 +5,9 @@
 //   and 86, which runs a frame at a time on TIde's timer and sends files over its link at once.
 // The model menu on the calculator bar picks one: the CE, or any ROM you've added for the others.
 // Both draw to the same canvas and share one keypad, relabelled for the TI-85 and 86.
+// It also offers a real calculator, plugged in over USB: files go to it with TILP's libraries (link.ts).
 import { fs } from "./store";
+import { connect, linkSupport, type Connected } from "./link";
 
 const $ = <T extends HTMLElement>(id: string) => document.getElementById(id) as T;
 
@@ -18,6 +20,9 @@ const BUNDLE = /\.b8[34]$/i;
 const SENDABLE = new RegExp(`\\.(?:${SEND_TYPES.join("|")})$`, "i");
 
 export interface TiFile { name: string; bytes: Uint8Array }
+
+/** The drag data of files and folders dragged from the Explorer: their paths, one per line. */
+export const TREE_DRAG = "application/x-tide-paths";
 
 /**
  * A copy of a TI variable file with every variable marked as archived, and its checksum updated.
@@ -164,7 +169,7 @@ const letterKey = (c: string) => (/[0-9]/.test(c) ? 0x8e + +c : /[A-Z]/.test(c) 
 
 /** A running emulator: the CE's (CEmu) or another model's (Wabbitemu). */
 interface Engine {
-  kind: "cemu" | "wabbit";
+  kind: "cemu" | "wabbit" | "usb";
   /** The model's name, such as "TI-84 Plus". */
   model: string;
   /** "ce", "plus" (a TI-83 Plus or 84 Plus, which runs .8xp programs) or "other". */
@@ -221,6 +226,8 @@ export function createCalc(opts: {
     setup: $("calc-setup"),
     setupText: $("calc-setup-text"),
     rom: $<HTMLButtonElement>("calc-rom"),
+    connect: $<HTMLButtonElement>("calc-connect"),
+    disconnect: $<HTMLButtonElement>("calc-disconnect"),
     screen: $("calc-screen"),
     lcd: $<HTMLCanvasElement>("calc-lcd"),
     area: $("calc-lcd-area"),
@@ -303,7 +310,7 @@ export function createCalc(opts: {
 
   /** Each animation frame: copy the LCD to the canvas. */
   function draw() {
-    if (!engine) { drawing = false; return; }
+    if (!engine || engine.kind === "usb") { drawing = false; return; }
     if (!ui.panel.hidden) {
       setScreenSize(engine.width, engine.height);
       const on = engine.frame(image);
@@ -376,7 +383,7 @@ export function createCalc(opts: {
   const files = (): Promise<Files> => fs.calc.files();
   const read = (name: string) => fs.calc.read(name);
   const MODEL_PREF = "tide-pref-calc-model", NAMES_PREF = "tide-pref-calc-rom-models";
-  /** "ce", or "rom:" and a stored ROM's file name. */
+  /** "ce", "usb" (a real calculator), or "rom:" and a stored ROM's file name. */
   let choice = "ce";
   try { choice = localStorage.getItem(MODEL_PREF) ?? "ce"; } catch { /* storage unavailable */ }
   /** The model each stored ROM turned out to be, for the menu. */
@@ -388,19 +395,23 @@ export function createCalc(opts: {
   function fillMenu(have: Files | null) {
     const roms = have?.roms ?? (choice.startsWith("rom:") ? [choice.slice(4)] : []);
     const options: [string, string][] = [["ce", "TI-84 Plus CE"], ...roms.map(n => [`rom:${n}`, romModels[n] ? `${romModels[n]} (${n})` : n] as [string, string])];
-    if (choice !== "ce" && !roms.includes(choice.slice(4)) && have) choice = "ce";
-    options.push(["add", "Add a ROM…"]);
+    if (choice.startsWith("rom:") && !roms.includes(choice.slice(4)) && have) choice = "ce";
+    options.push(["usb", "Real calculator (USB)"], ["add", "Add a ROM…"]);
     if (choice.startsWith("rom:")) options.push(["remove", `Remove ${choice.slice(4)}…`]);
     ui.model.replaceChildren(...options.map(([value, label]) => Object.assign(document.createElement("option"), { value, textContent: label })));
     ui.model.value = choice;
   }
   fillMenu(null);
 
-  function setup(text: string, rom: boolean) {
+  /** A message in place of the screen, with the button that sets the calculator up, if any. */
+  function setup(text: string, button: "rom" | "connect" | "disconnect" | null) {
     ui.setup.hidden = !text;
     ui.setupText.textContent = text;
-    ui.rom.hidden = !rom;
+    ui.rom.hidden = button !== "rom";
+    ui.connect.hidden = button !== "connect";
+    ui.disconnect.hidden = button !== "disconnect";
     ui.screen.hidden = !!text;
+    ui.reset.hidden = ui.reload.hidden = choice === "usb";
   }
 
   async function loadModule<T>(script: Uint8Array, options: Record<string, unknown>): Promise<T> {
@@ -629,15 +640,88 @@ export function createCalc(opts: {
     };
   }
 
+  // ── A real calculator, over USB ──
+  /** The calculator's family, from libticalcs's name for it ("TI84+CE", "TI83+", "TI84+ USB"…). */
+  const familyOf = (model: string): Engine["family"] =>
+    /CE|PCE/i.test(model) ? "ce" : /^TI-?8[34]\+|^TI-?82A/i.test(model) ? "plus" : "other";
+  const nameOf = (model: string) => model.replace(/^TI-?/i, "TI-").replace(/ USB$/i, "");
+  let link: Connected | null = null;
+
+  function usbEngine(l: Connected): Engine {
+    const notHere = (what: string) => async () => { throw new Error(`${what} works in the emulator. On a real calculator, use its keys.`); };
+    return {
+      kind: "usb", model: nameOf(l.model), family: familyOf(l.model), layout: LAYOUT_CE, width: 320, height: 240,
+      frame: () => false,
+      key: () => {},
+      // Groups only go into archive memory, as on the emulator.
+      send: file => l.send(file.name, /\.8xg$/i.test(file.name) ? archived(file.bytes) : file.bytes),
+      reset: () => {},
+      stop: () => { if (link === l) link = null; void l.close(); },
+      async launch(name) { throw new Error(`Start it on the calculator: prgm, then ${name.toUpperCase()}.`); },
+      type: notHere("key.type"),
+      openApp: notHere("app.open"),
+    };
+  }
+
+  function showLinked() {
+    if (!engine || engine.kind !== "usb") return;
+    setup(`Connected to the ${engine.model} over USB.\nSend files to it, or build and run: programs arrive on the calculator, ready to start from its prgm menu.\nKeep it on the home screen while files are sent.`, "disconnect");
+    ui.state.textContent = "connected";
+  }
+
+  /** From a click on Connect: the browser only asks which device to use during one. */
+  async function connectUsb() {
+    ui.connect.disabled = true;
+    ui.state.textContent = "connecting…";
+    try {
+      const l = await connect((text, err) => log(text.replace(/\n$/, ""), err ? "err" : "info"));
+      link = l;
+      engine = usbEngine(l);
+      sentLibs.clear();
+      l.onLost(() => {
+        if (link !== l) return;
+        link = null;
+        if (engine?.kind === "usb") engine = null;
+        say("The calculator was unplugged.");
+        if (choice === "usb") void ready();
+      });
+      setCredit();
+      showLinked();
+      say(`Connected to the ${engine.model}.`);
+    } catch (err) {
+      ui.state.textContent = "";
+      say(err instanceof Error ? err.message : String(err));
+    } finally {
+      ui.connect.disabled = false;
+    }
+  }
+
+  function setCredit() {
+    const kind = engine?.kind ?? (choice === "usb" ? "usb" : choice.startsWith("rom:") ? "wabbit" : "cemu");
+    const credit = $<HTMLAnchorElement>("calc-credit");
+    $("calc-credit-what").textContent = kind === "usb" ? "The link" : "Emulation";
+    credit.textContent = kind === "cemu" ? "CEmu" : kind === "wabbit" ? "Wabbitemu" : "TILP's libraries (WebTILP)";
+    credit.href = kind === "cemu" ? "https://github.com/CE-Programming/CEmu" : kind === "wabbit" ? "https://github.com/marwatk/wasmwabbitemu" : "https://github.com/debrouxl/tilibs";
+    $("calc-license").textContent = kind === "cemu" ? "GPLv3" : "GPLv2+";
+  }
+
   async function start(): Promise<boolean> {
     const have = known = await files();
     fillMenu(have);
-    const rom = choice.startsWith("rom:") ? choice.slice(4) : null;
-    if (!rom && !have.rom) {
-      setup("Choose a ROM dumped from your own calculator: a TI-84 Plus CE, or a TI-73, 81, 82, 83, 83 Plus, 84 Plus, 85 or 86. TIde keeps a copy in its data folder.", true);
+    if (choice === "usb") {
+      setCredit();
+      if (engine?.kind === "usb") { showLinked(); return true; }
+      const problem = linkSupport();
+      setup(problem ?? "Plug in your calculator with its USB cable (or the SilverLink cable, for older models), turn it on, and connect.\nOn Windows, TIde needs the WinUSB driver for it: install that with Zadig (zadig.akeo.ie), as for TILP.", problem ? null : "connect");
+      ui.state.textContent = "";
       return false;
     }
-    setup("", false);
+    const rom = choice.startsWith("rom:") ? choice.slice(4) : null;
+    if (!rom && !have.rom) {
+      setup("Choose a ROM dumped from your own calculator: a TI-84 Plus CE, or a TI-73, 81, 82, 83, 83 Plus, 84 Plus, 85 or 86. TIde keeps a copy in its data folder.", "rom");
+      return false;
+    }
+    setup("", null);
     ui.state.textContent = "starting…";
     let next: Engine | null;
     try {
@@ -648,15 +732,12 @@ export function createCalc(opts: {
     }
     if (!next) {
       setup(rom ? `Wabbitemu couldn't start with ${rom}. Choose another ROM, or pick a different calculator above.`
-        : "CEmu couldn't start with that ROM. Choose a TI-84 Plus CE ROM.", true);
+        : "CEmu couldn't start with that ROM. Choose a TI-84 Plus CE ROM.", "rom");
       ui.state.textContent = "";
       return false;
     }
     engine = next;
-    const credit = $<HTMLAnchorElement>("calc-credit");
-    credit.textContent = engine.kind === "cemu" ? "CEmu" : "Wabbitemu";
-    credit.href = engine.kind === "cemu" ? "https://github.com/CE-Programming/CEmu" : "https://github.com/marwatk/wasmwabbitemu";
-    $("calc-license").textContent = engine.kind === "cemu" ? "GPLv3" : "GPLv2+";
+    setCredit();
     buildKeypad(engine.layout);
     setScreenSize(engine.width, engine.height);
     ui.state.textContent = "running";
@@ -665,7 +746,10 @@ export function createCalc(opts: {
     return true;
   }
 
-  const ready = () => (engine ? Promise.resolve(true) : (starting ??= start().finally(() => { starting = null; })));
+  const ready = (): Promise<boolean> => {
+    if (engine) { if (engine.kind === "usb") showLinked(); return Promise.resolve(true); }
+    return (starting ??= start().finally(() => { starting = null; }));
+  };
 
   /** Stops the running calculator, so the next ready() starts the chosen one afresh. */
   async function stop() {
@@ -681,6 +765,7 @@ export function createCalc(opts: {
     await stop();
     fillMenu(known);
     if (await ready()) say(`Switched to the ${engine!.model}.`);
+    else if (next === "usb") say("Connect your calculator to send files to it.");
   }
 
   async function addRom() {
@@ -715,6 +800,12 @@ export function createCalc(opts: {
     if (value !== choice) await choose(value);
   });
   ui.rom.addEventListener("click", () => void addRom());
+  ui.connect.addEventListener("click", () => void connectUsb());
+  ui.disconnect.addEventListener("click", async () => {
+    await stop();
+    say("Disconnected the calculator.");
+    await ready();
+  });
   ui.reset.addEventListener("click", () => { engine?.reset(); sentLibs.clear(); say("Reset the calculator."); });
   // Reload ROM: stop this emulator and boot a new one from the stored ROM, as if the calculator was
   // just turned on with a fresh memory. Picks up a ROM changed with Choose ROM… too.
@@ -736,7 +827,7 @@ export function createCalc(opts: {
     async show() {
       ui.panel.hidden = false;
       opts.layout();
-      if (await ready()) ui.lcd.focus();
+      if (await ready() && engine?.kind !== "usb") ui.lcd.focus();
     },
     hide() {
       ui.panel.hidden = true;
@@ -748,7 +839,7 @@ export function createCalc(opts: {
     },
     async send(files) {
       await view.show();
-      if (!engine) { say("Set up the calculator to send files to it."); return; }
+      if (!engine) { say(choice === "usb" ? "Connect your calculator to send files to it." : "Set up the calculator to send files to it."); return; }
       const all = (await Promise.all(files.map(f => (BUNDLE.test(f.name) ? unbundle(f) : [f])))).flat();
       const skipped = all.filter(f => !SENDABLE.test(f.name));
       const sendable = all.filter(f => SENDABLE.test(f.name));
@@ -798,7 +889,7 @@ export function createCalc(opts: {
           say(`Sent to the ${engine.model}. ${err instanceof Error ? err.message : err}`);
         }
       } else say(`Sent to the ${engine.model}`);
-      ui.lcd.focus();
+      if (engine.kind !== "usb") ui.lcd.focus();
     },
   };
   ui.close.addEventListener("click", () => view.hide());
@@ -815,20 +906,25 @@ export function createCalc(opts: {
   }
   ui.send.addEventListener("click", async () => sendPaths(await opts.pickFiles()));
   const dropping = (on: boolean) => { ui.drop.hidden = !on; };
-  // In the desktop app the window gets the drop and reports file paths.
-  import("@tauri-apps/api/webview").then(({ getCurrentWebview }) => getCurrentWebview().onDragDropEvent(e => {
-    if (ui.panel.hidden) return;
-    if (e.payload.type === "enter" || e.payload.type === "over") dropping(true);
-    else if (e.payload.type === "leave") dropping(false);
-    else { dropping(false); void sendPaths(e.payload.paths.filter(p => !/\.tideex$/i.test(p))); } // extensions install instead
-  })).catch(() => { /* not in the desktop app */ });
-  // In a browser the page gets the files themselves.
-  ui.panel.addEventListener("dragover", e => { if (e.dataTransfer?.types.includes("Files")) { e.preventDefault(); dropping(true); } });
+  // The page gets the files themselves, in the desktop app too (its window leaves drops to the page),
+  // and files dragged from the Explorer as their paths.
+  ui.panel.addEventListener("dragover", e => {
+    const types = e.dataTransfer?.types ?? [];
+    if (!types.includes("Files") && !types.includes(TREE_DRAG)) return;
+    e.preventDefault();
+    e.stopPropagation();
+    if (e.dataTransfer) e.dataTransfer.dropEffect = "copy";
+    dropping(true);
+  });
   ui.panel.addEventListener("dragleave", e => { if (!ui.panel.contains(e.relatedTarget as Node | null)) dropping(false); });
   ui.panel.addEventListener("drop", async e => {
     e.preventDefault();
+    e.stopPropagation();
     dropping(false);
-    const list = [...(e.dataTransfer?.files ?? [])];
+    const fromTree = e.dataTransfer?.getData(TREE_DRAG);
+    if (fromTree) return sendPaths(fromTree.split("\n").filter(Boolean));
+    // Extensions install instead, from the window's own drop handler.
+    const list = [...(e.dataTransfer?.files ?? [])].filter(f => !/\.tideex$/i.test(f.name));
     if (!list.length) return;
     try {
       await view.send(await Promise.all(list.map(async f => ({ name: f.name, bytes: new Uint8Array(await f.arrayBuffer()) }))));

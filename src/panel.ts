@@ -1,7 +1,8 @@
 // The panel under the editor, as in VS Code: Output (every build, prerun, postrun and script run,
-// with its full log as it happens) and Terminal (command lines in the system shell). Both show
-// colors from ANSI codes, and a progress line that redraws itself with "\r" stays one line.
-import type { ShellRun } from "./store";
+// with its full log as it happens), Terminal (your shell, in xterm.js) and Console (the calculator's).
+// Output and Console show colors from ANSI codes, and a progress line that redraws itself with "\r"
+// stays one line.
+import { createTerminal } from "./terminal";
 
 const $ = <T extends HTMLElement>(id: string) => document.getElementById(id) as T;
 function el<K extends keyof HTMLElementTagNameMap>(tag: K, props: Record<string, unknown> = {}, ...kids: (Node | string)[]): HTMLElementTagNameMap[K] {
@@ -12,8 +13,9 @@ function el<K extends keyof HTMLElementTagNameMap>(tag: K, props: Record<string,
 
 // ── A log: text with ANSI colors, "\r" redraws and a cap on its length ──
 
-const COLORS = ["#4b5563", "#f87171", "#86d9a8", "#f5c07a", "#7dd3fc", "#c4b5fd", "#5eead4", "#e3e9f3"];
-const BRIGHT = ["#8b9cbb", "#fca5a5", "#bbf7d0", "#fde68a", "#bae6fd", "#ddd6fe", "#99f6e4", "#ffffff"];
+// The theme's ANSI colors (style.css), so text already written changes with dark and light mode.
+const COLORS = Array.from({ length: 8 }, (_, i) => `var(--ansi-${i})`);
+const BRIGHT = Array.from({ length: 8 }, (_, i) => `var(--ansi-${i + 8})`);
 const MAX_LINES = 20000;
 
 class Log {
@@ -100,7 +102,6 @@ export interface OutputRun {
 
 export function createPanel(opts: {
   available: boolean;
-  runShell: (dir: string, line: string, onOutput: (text: string, err: boolean) => void) => ShellRun;
   homeDir: () => Promise<string>;
   /** The open folder, where the terminal starts. */
   projectRoot: () => string | null;
@@ -111,6 +112,7 @@ export function createPanel(opts: {
   const panel = $("panel"), body = $("panel-body");
   const tabs = { output: $<HTMLButtonElement>("panel-tab-output"), terminal: $<HTMLButtonElement>("panel-tab-terminal"), console: $<HTMLButtonElement>("panel-tab-console") };
   const stopButton = $<HTMLButtonElement>("panel-stop"), clearButton = $<HTMLButtonElement>("panel-clear");
+  const newTerminal = $<HTMLButtonElement>("panel-new-terminal");
   let tab: PanelTab = "output";
 
   // ── Output ──
@@ -118,79 +120,12 @@ export function createPanel(opts: {
   let outputStop: (() => void) | null = null;
   const outputPane = el("div", { className: "panel-pane" }, outputLog.el);
 
-  // ── Terminal ──
-  const termLog = new Log("log term-log");
-  const prompt = el("span", { className: "term-prompt" });
-  const input = el("input", { className: "term-input", spellcheck: false, autocomplete: "off", ariaLabel: "Terminal command" });
-  const terminalPane = el("div", { className: "panel-pane terminal" }, termLog.el, el("div", { className: "term-line" }, prompt, input));
-  let cwd: string | null = null;
-  let running: ShellRun | null = null;
-  const history: string[] = [];
-  let historyAt = 0;
-  const WINDOWS = navigator.userAgent.includes("Windows");
-  const folderName = (p: string) => p.replace(/[\\/]+$/, "").split(/[\\/]/).pop() || p;
-  const showPrompt = () => {
-    prompt.textContent = running ? "input ›" : `${cwd ? folderName(cwd) : "…"} ›`;
-    input.placeholder = running ? "Type input for the running command, Enter to send" : "Type a command and press Enter";
-  };
-  /** Moves the terminal to a folder, saying so. */
-  function setCwd(dir: string, say = true) {
-    cwd = dir;
-    if (say) termLog.note(`Now in ${dir}`, "info");
-    showPrompt();
-  }
-  async function ensureCwd() {
-    if (!cwd) setCwd(opts.projectRoot() ?? (await opts.homeDir().catch(() => ".")), false);
-    return cwd!;
-  }
-
-  /** cd runs in the shell too, which checks the folder and prints where it ended up. */
-  async function changeDir(target: string) {
-    const here = await ensureCwd();
-    let where = "";
-    const line = WINDOWS ? `cd /d ${target || "%USERPROFILE%"} && cd` : `cd ${target || "~"} && pwd`;
-    const run = opts.runShell(here, line, (text, err) => { if (err) termLog.write(text, "err"); else where += text; });
-    const code = await run.done.catch(err => { termLog.write(`${err}\n`, "err"); return 1; });
-    if (code === 0 && where.trim()) setCwd(where.trim().split(/\r?\n/).pop()!);
-  }
-
-  async function submit() {
-    const line = input.value;
-    input.value = "";
-    if (running) {
-      // A command is running: the line is its input.
-      termLog.write(`${line}\n`, "input");
-      await running.input(`${line}\n`).catch(err => termLog.write(`${err}\n`, "err"));
-      return;
-    }
-    const trimmed = line.trim();
-    if (trimmed && history[history.length - 1] !== trimmed) history.push(trimmed);
-    historyAt = history.length;
-    const here = await ensureCwd();
-    termLog.note(`${folderName(here)} › ${trimmed}`, "cmd");
-    if (!trimmed) return;
-    if (/^(clear|cls)$/i.test(trimmed)) { termLog.clear(); return; }
-    const cd = /^(?:cd|chdir)(?:\s+(?:\/d\s+)?(.*))?$/i.exec(trimmed);
-    if (cd) { await changeDir((cd[1] ?? "").trim()); return; }
-    const run = running = opts.runShell(here, trimmed, (text, err) => termLog.write(text, err ? "err" : ""));
-    showPrompt();
-    updateStop();
-    const code = await run.done.catch(err => { termLog.write(`${err}\n`, "err"); return 1; });
-    running = null;
-    if (code === null) termLog.note("Stopped.", "err");
-    else if (code !== 0) termLog.note(`Exited with ${code}.`, "err");
-    showPrompt();
-    updateStop();
-  }
-  input.addEventListener("keydown", e => {
-    e.stopPropagation(); // TIde's shortcuts stay out of the terminal's way
-    if (e.key === "Enter") { e.preventDefault(); void submit(); }
-    else if (e.key === "ArrowUp" && !running && history.length) { e.preventDefault(); historyAt = Math.max(0, historyAt - 1); input.value = history[historyAt]; }
-    else if (e.key === "ArrowDown" && !running) { e.preventDefault(); historyAt = Math.min(history.length, historyAt + 1); input.value = history[historyAt] ?? ""; }
-    else if (e.key === "c" && e.ctrlKey && running && !input.selectionEnd) { e.preventDefault(); void running.stop(); }
-    else if (e.key === "l" && e.ctrlKey) { e.preventDefault(); termLog.clear(); }
+  // ── Terminal: xterm.js on a real shell (terminal.ts) ──
+  const terminal = createTerminal({
+    desktop: opts.available,
+    startDir: async () => opts.projectRoot() ?? (await opts.homeDir().catch(() => ".")),
   });
-  terminalPane.addEventListener("click", () => { if (!getSelection()?.toString()) input.focus(); });
+  const terminalPane = el("div", { className: "panel-pane terminal" }, terminal.el);
 
   // ── Console: the calculator's output (dbg_printf from C programs, emulator messages), as under the calculator ──
   const consoleLog = new Log("log console-log");
@@ -211,8 +146,8 @@ export function createPanel(opts: {
   window.addEventListener("resize", () => { if (!panel.hidden) fitHeight(); });
 
   function updateStop() {
-    const can = tab === "output" ? !!outputStop : tab === "terminal" && !!running;
-    stopButton.hidden = !can;
+    stopButton.hidden = !(tab === "output" && outputStop);
+    newTerminal.hidden = tab !== "terminal" || !opts.available;
   }
   /** The status bar's Terminal and Output buttons show which tab is open. */
   function markButtons() {
@@ -226,7 +161,8 @@ export function createPanel(opts: {
     outputPane.hidden = next !== "output";
     terminalPane.hidden = next !== "terminal";
     consolePane.hidden = next !== "console";
-    clearButton.title = next === "output" ? "Clear the output" : next === "console" ? "Clear the console" : "Clear the terminal (Ctrl+L)";
+    clearButton.title = next === "output" ? "Clear the output" : next === "console" ? "Clear the console" : "Clear the terminal's scrollback";
+    if (next === "terminal") terminal.show();
     updateStop();
     markButtons();
   }
@@ -235,11 +171,7 @@ export function createPanel(opts: {
     panel.hidden = false;
     select(next);
     if (opening) fitHeight();
-    if (next === "terminal") {
-      void ensureCwd().then(showPrompt);
-      if (!opts.available) termLog.note("The terminal is in the desktop app. Builds in the web version show their logs in Output.", "info");
-    }
-    if (focus && next === "terminal") input.focus();
+    if (focus && next === "terminal") requestAnimationFrame(() => terminal.focus());
   }
   function hide() { panel.hidden = true; opts.layout(); markButtons(); }
 
@@ -247,10 +179,11 @@ export function createPanel(opts: {
   const toggle = (next: PanelTab) => { if (!panel.hidden && tab === next) hide(); else show(next, true); };
   document.getElementById("status-terminal")?.addEventListener("click", () => toggle("terminal"));
   document.getElementById("status-output")?.addEventListener("click", () => toggle("output"));
-  tabs.terminal.addEventListener("click", () => { select("terminal"); input.focus(); });
-  clearButton.addEventListener("click", () => ({ output: outputLog, terminal: termLog, console: consoleLog })[tab].clear());
+  tabs.terminal.addEventListener("click", () => { select("terminal"); terminal.focus(); });
+  clearButton.addEventListener("click", () => (tab === "terminal" ? terminal : { output: outputLog, console: consoleLog }[tab]).clear());
+  newTerminal.addEventListener("click", () => { terminal.restart(opts.projectRoot() ?? undefined); terminal.focus(); });
   tabs.console.addEventListener("click", () => select("console"));
-  stopButton.addEventListener("click", () => { if (tab === "output") outputStop?.(); else void running?.stop(); });
+  stopButton.addEventListener("click", () => outputStop?.());
   $("panel-close").addEventListener("click", hide);
   // Drag the top edge to resize.
   $("panel-resize").addEventListener("pointerdown", e => {
@@ -266,7 +199,6 @@ export function createPanel(opts: {
     window.addEventListener("pointerup", up);
   });
   select("output");
-  showPrompt();
 
   return {
     show,
@@ -292,10 +224,8 @@ export function createPanel(opts: {
         },
       };
     },
-    /** The terminal moves to a newly opened folder, unless a command is running in it. */
-    projectChanged(root: string | null) {
-      if (root && !running) setCwd(root, cwd !== null);
-    },
+    /** A shell not started yet starts in a newly opened folder; one already running stays where it is (New terminal starts one there). */
+    projectChanged(_root: string | null) {},
     outputText: () => outputLog.text(),
     /** Writes a line from the calculator's console. */
     console(text: string, kind: "out" | "err" | "info" | "emu") {

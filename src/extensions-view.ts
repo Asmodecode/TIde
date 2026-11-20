@@ -122,10 +122,11 @@ export function createExtensionsView(opts: {
   }
 
   /** Installs a .TIdeex file, after showing what it is and asking. */
-  async function install(path: string) {
+  async function install(from: string | { name: string; bytes: Uint8Array }) {
+    const path = typeof from === "string" ? from : from.name;
     opts.show();
     try {
-      const pkg = await readPackage(await opts.readBinary(path));
+      const pkg = await readPackage(typeof from === "string" ? await opts.readBinary(from) : from.bytes);
       const m = pkg.manifest;
       const lines = [
         `Install ${m.name}${m.version ? ` ${m.version}` : ""}${m.author ? ` by ${m.author}` : ""}?`,

@@ -1,3 +1,5 @@
 # Built emulator core files: keep them byte for byte.
 emulator/*/dist/* binary
 toolchain/*/dist/* binary
+public/webtilp/*.wasm binary
+public/webtilp/webtilp.js -diff

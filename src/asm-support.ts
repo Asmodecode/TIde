@@ -278,6 +278,8 @@ export function registerAsm(): void {
     brackets: [["(", ")"]],
     autoClosingPairs: [{ open: "(", close: ")" }, { open: "'", close: "'", notIn: ["string", "comment"] }, { open: '"', close: '"', notIn: ["string", "comment"] }],
     wordPattern: /[A-Za-z_.?$@][\w.?$@]*/g,
+    // After a label on a line of its own, the code under it starts one tab in.
+    onEnterRules: [{ beforeText: /^[A-Za-z_.?$@][\w.?$@]*:\s*(?:;.*)?$/, action: { indentAction: monaco.languages.IndentAction.Indent } }],
   });
 
   const rules = monaco.languages.CompletionItemInsertTextRule.InsertAsSnippet;

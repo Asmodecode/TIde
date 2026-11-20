@@ -4,9 +4,11 @@ use std::sync::Mutex;
 use tauri::Manager;
 
 mod calc;
+mod link;
 mod emulator;
 mod git;
 mod project;
+mod pty;
 mod shell;
 mod watch;
 
@@ -104,6 +106,7 @@ pub fn run() {
     tauri::Builder::default()
         // Windows and Linux pass a double-clicked file on the command line; macOS sends RunEvent::Opened.
         .manage(shell::Shells::default())
+        .manage(pty::Ptys::default())
         .manage(watch::FolderWatch::default())
         .manage(OpenedFiles(Mutex::new(tideex_paths(std::env::args().skip(1)))))
         .plugin(tauri_plugin_opener::init())
@@ -124,6 +127,7 @@ pub fn run() {
             project::run_command,
             project::create_dir,
             project::delete_path,
+            project::move_path,
             git::git_status,
             git::git_stage,
             git::git_unstage,
@@ -139,6 +143,21 @@ pub fn run() {
             calc::calc_set_rom,
             calc::calc_remove_rom,
             calc::calc_read,
+            link::link_devices,
+            link::link_open,
+            link::link_close,
+            link::link_is_open,
+            link::link_set_configuration,
+            link::link_claim,
+            link::link_release,
+            link::link_alternate,
+            link::link_control_in,
+            link::link_control_out,
+            link::link_transfer_out,
+            link::link_transfer_in,
+            link::link_clear_halt,
+            link::link_reset,
+            link::link_string,
             calc::calc_read_program,
             calc::find_clibs,
             extensions_dir,
@@ -148,6 +167,10 @@ pub fn run() {
             shell::shell_input,
             shell::shell_stop,
             shell::shell_forget,
+            pty::pty_open,
+            pty::pty_write,
+            pty::pty_resize,
+            pty::pty_kill,
             watch::watch_folder
         ])
         .build(tauri::generate_context!())

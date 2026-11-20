@@ -29,6 +29,12 @@ export function tokenize(source: string, target: Target = getTarget()): Tokenize
   let line = 1, lineStart = 0, inString = false;
 
   for (let i = 0; i < text.length;) {
+    // Indentation is only for reading: the calculator has none, and spaces there would be stored in
+    // the program (a byte each) and change what some lines do. A line start is never inside a string.
+    if (i === lineStart && (text[i] === " " || text[i] === "\t")) {
+      while (text[i] === " " || text[i] === "\t") i++;
+      continue;
+    }
     let hit: number[] | undefined;
     let length = 1;
     if (inString) {
