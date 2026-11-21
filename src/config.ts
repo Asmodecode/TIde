@@ -20,6 +20,8 @@ export interface ProjectConfig {
   send?: string[];
   libraries?: boolean | string[];
   runIn?: "calculator" | "cemu";
+  /** The real calculator this project sends to, and how it's connected. */
+  link?: { via?: "usb" | "serial"; port?: string; model?: string };
   /** Named command lines, run from Scripts in the status bar. */
   scripts?: Record<string, string>;
   editor?: Partial<Settings>;
@@ -77,6 +79,17 @@ export const CONFIG_SCHEMA = {
       default: true,
     },
     runIn: { enum: ["calculator", "cemu"], description: "Where ▶ Run goes: TIde's calculator, or the CEmu app.", default: "calculator" },
+    link: {
+      type: "object",
+      additionalProperties: false,
+      description: "A real calculator this project sends to. Opening the project switches the calculator panel to it; press Connect there once.",
+      properties: {
+        via: { enum: ["usb", "serial"], description: "\"usb\": a USB cable or the SilverLink, through TILP's libraries. \"serial\": a serial cable such as TI's grey TI-Graph Link, through TIde's own link." },
+        port: { type: "string", description: "The serial port, for \"serial\" in the desktop app, such as \"COM3\" or \"/dev/ttyUSB0\". The browser asks for the port instead.", examples: ["COM3", "/dev/ttyUSB0"] },
+        model: { enum: ["TI-84 Plus", "TI-84 Plus SE", "TI-83 Plus", "TI-83 Plus SE", "TI-83", "TI-82", "TI-73"], description: "The calculator on the serial cable. USB finds out by itself." },
+      },
+      examples: [{ via: "serial", port: "COM3", model: "TI-84 Plus" }, { via: "usb" }],
+    },
     scripts: {
       type: "object",
       description: "Shell command lines you can run from Scripts in the status bar, by name, in the project folder. Their output streams to the Output panel.",
@@ -150,6 +163,12 @@ export function readConfig(text: string): ProjectConfig {
   }
   if (c.scripts !== undefined && (typeof c.scripts !== "object" || Object.values(c.scripts).some(v => typeof v !== "string"))) {
     throw new Error("\"scripts\" maps names to command lines, such as { \"clean\": \"make clean\" }.");
+  }
+  const link = c.link;
+  if (link !== undefined && (typeof link !== "object" || link === null || Array.isArray(link)
+    || (link.via !== undefined && link.via !== "usb" && link.via !== "serial")
+    || (link.port !== undefined && typeof link.port !== "string") || (link.model !== undefined && typeof link.model !== "string"))) {
+    throw new Error("\"link\" is { \"via\": \"usb\" or \"serial\", \"port\": \"COM3\", \"model\": \"TI-84 Plus\" }.");
   }
   return c;
 }

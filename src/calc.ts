@@ -8,6 +8,9 @@
 // It also offers a real calculator, plugged in over USB: files go to it with TILP's libraries (link.ts).
 import { fs } from "./store";
 import { connect, linkSupport, type Connected } from "./link";
+import { DBUS_MODELS, DbusLink, modelFamily, type DbusModel } from "./dbus";
+import { listPorts, openPort, serialSupport } from "./serial";
+import { probeEvo } from "./evo";
 
 const $ = <T extends HTMLElement>(id: string) => document.getElementById(id) as T;
 
@@ -169,7 +172,7 @@ const letterKey = (c: string) => (/[0-9]/.test(c) ? 0x8e + +c : /[A-Z]/.test(c) 
 
 /** A running emulator: the CE's (CEmu) or another model's (Wabbitemu). */
 interface Engine {
-  kind: "cemu" | "wabbit" | "usb";
+  kind: "cemu" | "wabbit" | "usb" | "serial";
   /** The model's name, such as "TI-84 Plus". */
   model: string;
   /** "ce", "plus" (a TI-83 Plus or 84 Plus, which runs .8xp programs) or "other". */
@@ -206,9 +209,13 @@ export interface Calc {
   macro(name: string, arg: string): Promise<void>;
   /** Sends any TI files, unpacking bundles. */
   send(files: TiFile[]): Promise<void>;
+  /** The open project's "link" settings from tide.json: which cable, port and calculator. */
+  setLink(link: { via?: "usb" | "serial"; port?: string; model?: string } | undefined): void;
 }
 
 const sleep = (ms: number) => new Promise(r => window.setTimeout(r, ms));
+/** A real calculator rather than an emulator: a menu choice or an engine's kind. */
+const isReal = (kind: string) => kind === "usb" || kind === "serial" || kind === "evo";
 
 export function createCalc(opts: {
   say: (text: string) => void;
@@ -227,6 +234,9 @@ export function createCalc(opts: {
     setupText: $("calc-setup-text"),
     rom: $<HTMLButtonElement>("calc-rom"),
     connect: $<HTMLButtonElement>("calc-connect"),
+    serialForm: $("calc-serial"),
+    serialModel: $<HTMLSelectElement>("calc-serial-model"),
+    serialPort: $<HTMLSelectElement>("calc-serial-port"),
     disconnect: $<HTMLButtonElement>("calc-disconnect"),
     screen: $("calc-screen"),
     lcd: $<HTMLCanvasElement>("calc-lcd"),
@@ -310,7 +320,7 @@ export function createCalc(opts: {
 
   /** Each animation frame: copy the LCD to the canvas. */
   function draw() {
-    if (!engine || engine.kind === "usb") { drawing = false; return; }
+    if (!engine || isReal(engine.kind)) { drawing = false; return; }
     if (!ui.panel.hidden) {
       setScreenSize(engine.width, engine.height);
       const on = engine.frame(image);
@@ -383,7 +393,7 @@ export function createCalc(opts: {
   const files = (): Promise<Files> => fs.calc.files();
   const read = (name: string) => fs.calc.read(name);
   const MODEL_PREF = "tide-pref-calc-model", NAMES_PREF = "tide-pref-calc-rom-models";
-  /** "ce", "usb" (a real calculator), or "rom:" and a stored ROM's file name. */
+  /** "ce"; a real calculator: "usb", "serial" or "evo"; or "rom:" and a stored ROM's file name. */
   let choice = "ce";
   try { choice = localStorage.getItem(MODEL_PREF) ?? "ce"; } catch { /* storage unavailable */ }
   /** The model each stored ROM turned out to be, for the menu. */
@@ -396,7 +406,7 @@ export function createCalc(opts: {
     const roms = have?.roms ?? (choice.startsWith("rom:") ? [choice.slice(4)] : []);
     const options: [string, string][] = [["ce", "TI-84 Plus CE"], ...roms.map(n => [`rom:${n}`, romModels[n] ? `${romModels[n]} (${n})` : n] as [string, string])];
     if (choice.startsWith("rom:") && !roms.includes(choice.slice(4)) && have) choice = "ce";
-    options.push(["usb", "Real calculator (USB)"], ["add", "Add a ROM…"]);
+    options.push(["usb", "Real calculator (USB)"], ["serial", "Real calculator (serial cable)"], ["evo", "TI-84 Evo (USB, first steps)"], ["add", "Add a ROM…"]);
     if (choice.startsWith("rom:")) options.push(["remove", `Remove ${choice.slice(4)}…`]);
     ui.model.replaceChildren(...options.map(([value, label]) => Object.assign(document.createElement("option"), { value, textContent: label })));
     ui.model.value = choice;
@@ -410,8 +420,9 @@ export function createCalc(opts: {
     ui.rom.hidden = button !== "rom";
     ui.connect.hidden = button !== "connect";
     ui.disconnect.hidden = button !== "disconnect";
+    ui.serialForm.hidden = !(choice === "serial" && button === "connect");
     ui.screen.hidden = !!text;
-    ui.reset.hidden = ui.reload.hidden = choice === "usb";
+    ui.reset.hidden = ui.reload.hidden = isReal(choice);
   }
 
   async function loadModule<T>(script: Uint8Array, options: Record<string, unknown>): Promise<T> {
@@ -664,8 +675,8 @@ export function createCalc(opts: {
   }
 
   function showLinked() {
-    if (!engine || engine.kind !== "usb") return;
-    setup(`Connected to the ${engine.model} over USB.\nSend files to it, or build and run: programs arrive on the calculator, ready to start from its prgm menu.\nKeep it on the home screen while files are sent.`, "disconnect");
+    if (!engine || !isReal(engine.kind)) return;
+    setup(`Connected to the ${engine.model} over ${engine.kind === "usb" ? "USB" : `the serial cable (${serialName})`}.\nSend files to it, or build and run: programs arrive on the calculator, ready to start from its prgm menu.\nKeep it on the home screen while files are sent.`, "disconnect");
     ui.state.textContent = "connected";
   }
 
@@ -681,7 +692,7 @@ export function createCalc(opts: {
       l.onLost(() => {
         if (link !== l) return;
         link = null;
-        if (engine?.kind === "usb") engine = null;
+        if (engine && isReal(engine.kind)) engine = null;
         say("The calculator was unplugged.");
         if (choice === "usb") void ready();
       });
@@ -696,18 +707,115 @@ export function createCalc(opts: {
     }
   }
 
+  // ── A real calculator, over a serial cable: TIde's own link protocol (dbus.ts) ──
+  const SERIAL_PREF = "tide-pref-calc-serial";
+  let serialChoice: { model: DbusModel; port: string } = { model: "TI-84 Plus", port: "" };
+  try { serialChoice = { ...serialChoice, ...JSON.parse(localStorage.getItem(SERIAL_PREF) ?? "{}") }; } catch { /* storage unavailable or bad JSON */ }
+  /** What tide.json's "link" sets, over what was picked last. */
+  let projectLink: { model?: DbusModel; port?: string } = {};
+  let serialName = "";
+
+  async function fillSerialForm() {
+    const model = projectLink.model ?? serialChoice.model;
+    ui.serialModel.replaceChildren(...DBUS_MODELS.map(m => Object.assign(document.createElement("option"), { value: m, textContent: m })));
+    ui.serialModel.value = model;
+    const ports = await listPorts().catch(err => { log(`Couldn't list the serial ports: ${err}`, "err"); return [] as { path: string; description: string }[]; });
+    ui.serialPort.hidden = ports === null;
+    if (ports) {
+      const want = projectLink.port ?? serialChoice.port;
+      const options = ports.map(p => Object.assign(document.createElement("option"), { value: p.path, textContent: p.description ? `${p.path}: ${p.description}` : p.path }));
+      // A port tide.json names that isn't plugged in still shows, so it's clear what's missing.
+      if (want && !ports.some(p => p.path === want)) options.push(Object.assign(document.createElement("option"), { value: want, textContent: `${want} (not found)` }));
+      ui.serialPort.replaceChildren(...(options.length ? options : [Object.assign(document.createElement("option"), { value: "", textContent: "No serial ports found" })]));
+      if (want) ui.serialPort.value = want;
+    }
+  }
+
+  function serialEngine(l: DbusLink): Engine {
+    const notHere = (what: string) => async () => { throw new Error(`${what} works in the emulator. On a real calculator, use its keys.`); };
+    return {
+      kind: "serial", model: l.model, family: modelFamily(l.model), layout: LAYOUT_CE, width: 320, height: 240,
+      frame: () => false,
+      key: () => {},
+      send: file => l.sendFile(file.name, file.bytes),
+      reset: () => {},
+      stop: () => { void l.close(); },
+      async launch(name) { throw new Error(`Start it on the calculator: prgm, then ${name.toUpperCase()}.`); },
+      type: notHere("key.type"),
+      openApp: notHere("app.open"),
+    };
+  }
+
+  async function connectSerial() {
+    const model = ui.serialModel.value as DbusModel;
+    const port = ui.serialPort.hidden ? null : ui.serialPort.value;
+    ui.connect.disabled = true;
+    ui.state.textContent = "connecting…";
+    try {
+      // In a browser the port is picked in its chooser, which needs this click.
+      const byteLink = await openPort(port);
+      const l = new DbusLink(byteLink, model, text => log(text, "info"));
+      try {
+        await l.check();
+      } catch (err) {
+        await l.close().catch(() => {});
+        throw err;
+      }
+      serialChoice = { model, port: port ?? "" };
+      remember(SERIAL_PREF, serialChoice);
+      serialName = byteLink.name;
+      engine = serialEngine(l);
+      sentLibs.clear();
+      setCredit();
+      showLinked();
+      say(model === "TI-82" ? `Ready to send to the TI-82 on ${byteLink.name}. Start Link > Receive on it before each send.` : `Connected to the ${model} on ${byteLink.name}.`);
+    } catch (err) {
+      ui.state.textContent = "";
+      say(err instanceof Error ? err.message : String(err));
+    } finally {
+      ui.connect.disabled = false;
+    }
+  }
+
+  async function connectEvo() {
+    ui.connect.disabled = true;
+    try {
+      say(await probeEvo(line => log(line, "info")));
+    } catch (err) {
+      say(err instanceof Error ? err.message : String(err));
+    } finally {
+      ui.connect.disabled = false;
+    }
+  }
+
   function setCredit() {
-    const kind = engine?.kind ?? (choice === "usb" ? "usb" : choice.startsWith("rom:") ? "wabbit" : "cemu");
+    const kind = engine?.kind ?? (choice === "usb" ? "usb" : choice === "serial" || choice === "evo" ? "serial" : choice.startsWith("rom:") ? "wabbit" : "cemu");
     const credit = $<HTMLAnchorElement>("calc-credit");
-    $("calc-credit-what").textContent = kind === "usb" ? "The link" : "Emulation";
-    credit.textContent = kind === "cemu" ? "CEmu" : kind === "wabbit" ? "Wabbitemu" : "TILP's libraries (WebTILP)";
-    credit.href = kind === "cemu" ? "https://github.com/CE-Programming/CEmu" : kind === "wabbit" ? "https://github.com/marwatk/wasmwabbitemu" : "https://github.com/debrouxl/tilibs";
-    $("calc-license").textContent = kind === "cemu" ? "GPLv3" : "GPLv2+";
+    $("calc-credit-what").textContent = isReal(kind) ? "The link" : "Emulation";
+    // The serial link is TIde's own, from the TI Link Protocol Guide.
+    credit.textContent = kind === "cemu" ? "CEmu" : kind === "wabbit" ? "Wabbitemu" : kind === "usb" ? "TILP's libraries (WebTILP)" : "TIde, after the TI Link Protocol Guide";
+    credit.href = kind === "cemu" ? "https://github.com/CE-Programming/CEmu" : kind === "wabbit" ? "https://github.com/marwatk/wasmwabbitemu" : kind === "usb" ? "https://github.com/debrouxl/tilibs" : "https://merthsoft.com/linkguide/";
+    $("calc-license").textContent = kind === "cemu" ? "GPLv3" : kind === "serial" ? "TIde's license" : "GPLv2+";
   }
 
   async function start(): Promise<boolean> {
     const have = known = await files();
     fillMenu(have);
+    if (choice === "serial") {
+      setCredit();
+      if (engine?.kind === "serial") { showLinked(); return true; }
+      const problem = serialSupport();
+      if (!problem) await fillSerialForm();
+      setup(problem ?? "Connect the calculator's link port to a serial port with TI's grey TI-Graph Link (or a USB-to-serial adapter and one), and pick the calculator and port.\nThe TI-83 Plus, 84 Plus, 83 and 73 take files at the home screen; on a TI-82, start Link > Receive first. The CE family has only USB: use \"Real calculator (USB)\" for it.", problem ? null : "connect");
+      ui.state.textContent = "";
+      return false;
+    }
+    if (choice === "evo") {
+      setCredit();
+      setup("TIde can find a TI-84 Evo and read what it reports over USB, the first step toward sending to it. It can't send files to it yet: the Evo's link protocol isn't published.\nPlug it in with its USB-C cable and press Connect; what it reports goes to the Console.", "connect");
+      ui.state.textContent = "";
+      return false;
+    }
     if (choice === "usb") {
       setCredit();
       if (engine?.kind === "usb") { showLinked(); return true; }
@@ -747,7 +855,7 @@ export function createCalc(opts: {
   }
 
   const ready = (): Promise<boolean> => {
-    if (engine) { if (engine.kind === "usb") showLinked(); return Promise.resolve(true); }
+    if (engine) { if (isReal(engine.kind)) showLinked(); return Promise.resolve(true); }
     return (starting ??= start().finally(() => { starting = null; }));
   };
 
@@ -765,7 +873,7 @@ export function createCalc(opts: {
     await stop();
     fillMenu(known);
     if (await ready()) say(`Switched to the ${engine!.model}.`);
-    else if (next === "usb") say("Connect your calculator to send files to it.");
+    else if (next === "usb" || next === "serial") say("Connect your calculator to send files to it.");
   }
 
   async function addRom() {
@@ -800,7 +908,7 @@ export function createCalc(opts: {
     if (value !== choice) await choose(value);
   });
   ui.rom.addEventListener("click", () => void addRom());
-  ui.connect.addEventListener("click", () => void connectUsb());
+  ui.connect.addEventListener("click", () => void (choice === "serial" ? connectSerial() : choice === "evo" ? connectEvo() : connectUsb()));
   ui.disconnect.addEventListener("click", async () => {
     await stop();
     say("Disconnected the calculator.");
@@ -827,7 +935,7 @@ export function createCalc(opts: {
     async show() {
       ui.panel.hidden = false;
       opts.layout();
-      if (await ready() && engine?.kind !== "usb") ui.lcd.focus();
+      if (await ready() && engine && !isReal(engine.kind)) ui.lcd.focus();
     },
     hide() {
       ui.panel.hidden = true;
@@ -839,7 +947,7 @@ export function createCalc(opts: {
     },
     async send(files) {
       await view.show();
-      if (!engine) { say(choice === "usb" ? "Connect your calculator to send files to it." : "Set up the calculator to send files to it."); return; }
+      if (!engine) { say(isReal(choice) ? "Connect your calculator to send files to it." : "Set up the calculator to send files to it."); return; }
       const all = (await Promise.all(files.map(f => (BUNDLE.test(f.name) ? unbundle(f) : [f])))).flat();
       const skipped = all.filter(f => !SENDABLE.test(f.name));
       const sendable = all.filter(f => SENDABLE.test(f.name));
@@ -854,6 +962,13 @@ export function createCalc(opts: {
       }
       if (skipped.length) say(`Skipped ${skipped.map(f => f.name).join(", ")}: not a TI file a calculator can receive.`);
       else if (sendable.length) say(`Sent ${sendable.length === 1 ? sendable[0].name : `${sendable.length} files`} to the ${engine.model}.`);
+    },
+    setLink(cfg) {
+      projectLink = { port: cfg?.port, model: DBUS_MODELS.find(m => m === cfg?.model) };
+      if (cfg?.model && !projectLink.model) say(`tide.json's link.model "${cfg.model}" isn't one TIde's serial link knows: ${DBUS_MODELS.join(", ")}.`);
+      // A project that says which cable it uses switches the calculator to it, unless that's already the choice.
+      if (cfg?.via && cfg.via !== choice) void choose(cfg.via);
+      else if (choice === "serial" && !engine && !ui.serialForm.hidden) void fillSerialForm();
     },
     async macro(name, arg) {
       await view.show();
@@ -889,7 +1004,7 @@ export function createCalc(opts: {
           say(`Sent to the ${engine.model}. ${err instanceof Error ? err.message : err}`);
         }
       } else say(`Sent to the ${engine.model}`);
-      if (engine.kind !== "usb") ui.lcd.focus();
+      if (!isReal(engine.kind)) ui.lcd.focus();
     },
   };
   ui.close.addEventListener("click", () => view.hide());

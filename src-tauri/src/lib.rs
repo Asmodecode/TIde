@@ -9,6 +9,7 @@ mod emulator;
 mod git;
 mod project;
 mod pty;
+mod serial;
 mod shell;
 mod watch;
 
@@ -171,6 +172,11 @@ pub fn run() {
             pty::pty_write,
             pty::pty_resize,
             pty::pty_kill,
+            serial::serial_ports,
+            serial::serial_open,
+            serial::serial_close,
+            serial::serial_write,
+            serial::serial_read,
             watch::watch_folder
         ])
         .build(tauri::generate_context!())

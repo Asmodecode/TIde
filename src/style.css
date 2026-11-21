@@ -271,6 +271,10 @@ body { font: 13px/1.4 var(--ui); background: var(--body); color: var(--ink); ove
 .calc-setup button.quiet { color: var(--ink); background: var(--body); border: 1px solid var(--rule); font-weight: 400; }
 .calc-setup button.quiet:hover { border-color: var(--key); }
 .calc-setup p { white-space: pre-line; }
+.calc-serial { display: grid; grid-template-columns: auto 1fr; gap: 8px 10px; align-items: center; }
+.calc-serial[hidden], .calc-serial select[hidden] { display: none; }
+.calc-serial label { display: contents; font-size: 12.5px; color: var(--muted); }
+.calc-serial select { font: inherit; font-size: 13px; color: var(--ink); background: var(--body); border: 1px solid var(--rule); border-radius: 3px; padding: 4px 6px; }
 .calc-body { flex: 1; min-height: 0; overflow: auto; display: grid; grid-template-columns: repeat(2, var(--pane-w, 420px)); grid-auto-rows: var(--pane-h, 340px); justify-content: center; align-content: center; gap: 24px; padding: 20px 24px 8px; }
 .calc-body.stacked { grid-template-columns: var(--pane-w, 420px); }
 .calc-lcd-area { display: grid; place-items: center; min-width: 0; }

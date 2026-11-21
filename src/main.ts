@@ -594,6 +594,7 @@ async function loadConfig(exists = true) {
   }
   setProjectSettings(config.editor ?? {});
   if (config.calculator && config.calculator !== getTarget()) setTarget(config.calculator);
+  calc.setLink(config.link);
   renderScripts();
   applyEditorMode();
 }
