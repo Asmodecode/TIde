@@ -2,7 +2,8 @@
 // - real folders on your computer, opened with the browser's folder picker (Chrome and Edge), as
 //   "/<folder name>/…"; TIde remembers them (in IndexedDB) and asks to reopen them after a reload;
 // - projects kept in the browser's own storage (the origin private file system), on every browser,
-//   as "/Browser/<project>/…".
+//   as "/Browser/<project>/…". Where a browser can't write to folders on your computer (Firefox,
+//   Safari), Open folder still uses its system folder picker, and copies the folder in as one.
 // Files picked with an open dialog become "/picked/…", and save dialogs "/save/…", so they read and
 // write like any other path. TIde's own data (extensions, calculator ROMs) is in browser storage too.
 
@@ -157,6 +158,46 @@ function choose(extensions: string[], multiple: boolean): Promise<string[]> {
   });
 }
 
+/** Never worth copying in, as the desktop app's Explorer leaves them out. */
+const SKIP = new Set([".git", "node_modules", "target", ".DS_Store"]);
+
+/**
+ * The system folder picker every browser has (an input with webkitdirectory), for browsers that can't
+ * open folders to write to: the folder's files are copied into a browser project of the same name.
+ */
+function importFolder(): Promise<string | null> {
+  return new Promise((resolve, reject) => {
+    const input = Object.assign(document.createElement("input"), { type: "file", multiple: true });
+    input.webkitdirectory = true;
+    input.addEventListener("cancel", () => resolve(null));
+    input.addEventListener("change", async () => {
+      try {
+        const files = [...(input.files ?? [])];
+        if (!files.length) { resolve(null); return; }
+        const name = files[0].webkitRelativePath.split("/")[0] || "Folder";
+        // A copy beside any project already named so: "name (2)".
+        const taken = new Set(await browserProjects());
+        let project = name;
+        for (let n = 2; taken.has(project); n++) project = `${name} (${n})`;
+        const root = await (await browserRoot()).getDirectoryHandle(project, { create: true });
+        for (const file of files) {
+          const parts = file.webkitRelativePath.split("/").slice(1);
+          if (!parts.length || parts.some(p => SKIP.has(p))) continue;
+          let dir = root;
+          for (const part of parts.slice(0, -1)) dir = await dir.getDirectoryHandle(part, { create: true });
+          const w = await (await dir.getFileHandle(parts[parts.length - 1], { create: true })).createWritable();
+          await w.write(file);
+          await w.close();
+        }
+        resolve(`${BROWSER}/${project}`);
+      } catch (err) {
+        reject(err);
+      }
+    });
+    input.click();
+  });
+}
+
 /** The browser projects, by name. */
 async function browserProjects(): Promise<string[]> {
   const names: string[] = [];
@@ -166,9 +207,12 @@ async function browserProjects(): Promise<string[]> {
 
 export const webFs = {
   canOpenFolders,
-  /** Opens a real folder where the browser allows it, otherwise a browser project. */
+  /**
+   * Opens a folder with the browser's system folder picker: the folder itself where the browser can
+   * write to it, otherwise a copy of it kept in the browser. Call it from a click.
+   */
   async pickFolder(): Promise<string | null> {
-    if (!canOpenFolders) return webFs.pickBrowserProject();
+    if (!canOpenFolders) return importFolder();
     try { return await register(await picker.showDirectoryPicker!({ mode: "readwrite", id: "tide" })); }
     catch (err) { if ((err as Error).name === "AbortError") return null; throw err; }
   },

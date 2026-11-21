@@ -1048,7 +1048,10 @@ async function openFolder() {
   if (!fs.available) { setMessage("Opening folders needs the desktop app."); return; }
   try {
     const root = await fs.pickFolder();
-    if (root) await loadProject(root);
+    if (!root) return;
+    await loadProject(root);
+    // Browsers that can't write to folders on your computer get a copy kept in the browser.
+    if (fs.web && root.startsWith("/Browser/")) setMessage(`Opened a copy of ${baseName(root)}, kept in this browser: this browser can't save into folders on your computer. Chrome and Edge can.`);
   } catch (err) {
     setMessage(`Could not open folder: ${err}`);
   }
