@@ -1,9 +1,11 @@
 name: Build
 
-# Two kinds of release:
+# Three kinds of release:
 # - every push to main refreshes the rolling "latest" prerelease (installers only, no latest.json);
 # - a version tag (v1.5.0) builds that version as a stable release, with latest.json, which installed
 #   apps read to update. The app checks releases/latest/download/latest.json: the newest stable release.
+# - a web version tag (v1.6.1-web) builds and publishes only the web version: no installers, and its
+#   release is never marked latest, so installed apps keep updating from the last stable release.
 on:
   push:
     branches: [main]
@@ -26,6 +28,7 @@ jobs:
       version: ${{ steps.start.outputs.version }}
       release: ${{ steps.start.outputs.release }}
       stable: ${{ steps.start.outputs.stable }}
+      web: ${{ steps.start.outputs.web }}
 
     steps:
       - uses: actions/checkout@v4
@@ -42,7 +45,20 @@ jobs:
           # The version is the one in tauri.conf.json. Installed apps update when it goes up.
           version="$(jq -r .version src-tauri/tauri.conf.json)"
           echo "version=$version" >> "$GITHUB_OUTPUT"
-          if [[ "$GITHUB_REF" == refs/tags/v* ]]; then
+          if [[ "$GITHUB_REF" == refs/tags/v*-web ]]; then
+            # The web version alone: its own version, from the tag, and nothing for the installed apps.
+            tag="${GITHUB_REF#refs/tags/}"
+            version="${tag#v}"
+            echo "version=$version" >> "$GITHUB_OUTPUT"
+            echo "release=$tag" >> "$GITHUB_OUTPUT"
+            echo "stable=false" >> "$GITHUB_OUTPUT"
+            echo "web=true" >> "$GITHUB_OUTPUT"
+            if ! gh release view "$tag" --repo "$REPO" >/dev/null 2>&1; then
+              notes="$(cat WEB_RELEASE_NOTES.md 2>/dev/null || echo "TIde's web version, $version.")"
+              gh release create "$tag" --repo "$REPO" --verify-tag --latest=false \
+                --title "TIde $version" --notes "$notes"
+            fi
+          elif [[ "$GITHUB_REF" == refs/tags/v* ]]; then
             tag="${GITHUB_REF#refs/tags/}"
             if [ "$tag" != "v$version" ]; then
               echo "::error::The tag $tag doesn't match the version in tauri.conf.json ($version)."
@@ -69,6 +85,8 @@ jobs:
   build:
     name: ${{ matrix.name }}
     needs: prepare
+    # A web version tag builds no installers.
+    if: needs.prepare.outputs.web != 'true'
     runs-on: ${{ matrix.os }}
 
     strategy:
@@ -204,7 +222,7 @@ jobs:
     # included) to the gh-pages branch, and publishes the same build to GitHub Pages at
     # https://<owner>.github.io/TIde/ (Settings > Pages > Source: GitHub Actions). The branch holds
     # only the latest build: each one replaces it, so old builds' large files don't pile up.
-    if: needs.prepare.outputs.stable == 'true'
+    if: needs.prepare.outputs.stable == 'true' || needs.prepare.outputs.web == 'true'
     needs: prepare
     runs-on: ubuntu-latest
     permissions:
@@ -223,12 +241,12 @@ jobs:
       - run: npm ci
       # The C compiler is too big for the repository: it comes from the web-toolchain release
       # (the Web toolchain workflow builds it). Without it, the site builds everything but C.
-      - name: Get ez80-clang
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      # The C compiler (ez80-clang for WebAssembly) is in the repository, in toolchain/clang/dist.
+      - name: Check ez80-clang is there
         run: |
-          mkdir -p toolchain/clang/dist
-          gh release download web-toolchain --repo "${{ github.repository }}" --pattern "clang.*" --dir toolchain/clang/dist             || echo "::warning::No web-toolchain release yet, so the web version can't compile C. Run the Web toolchain workflow."
+          if [ ! -s toolchain/clang/dist/clang.wasm ] || [ ! -s toolchain/clang/dist/clang.js ]; then
+            echo "::warning::toolchain/clang/dist has no clang.js and clang.wasm, so the web version can't compile C."
+          fi
       - run: npm run build:web
       - name: Commit the built site to gh-pages
         env:

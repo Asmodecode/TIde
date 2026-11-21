@@ -24,5 +24,3 @@ dist-ssr
 *.sln
 *.sw?
 
-# ez80-clang for WebAssembly is too big to keep: the web-toolchain release has it.
-/toolchain/clang/dist/clang.*
