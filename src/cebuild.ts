@@ -135,6 +135,61 @@ export function makefileVars(text: string): Record<string, string> {
   return vars;
 }
 
+/** A rule of a makefile's own: what it needs first, and its recipe (shell commands). */
+export interface MakeRule { prereqs: string[]; recipe: string[] }
+/** A makefile's own rules, and which goal plain make starts from. */
+export interface MakeGraph { rules: Map<string, MakeRule>; defaultGoal: string }
+
+/**
+ * A makefile's own rules (appvars: flash-app, all: package…), by target as written ($(MOD_VAR) stays
+ * as it is: rules and prerequisites match by name), with their recipes. Special targets (.PHONY…)
+ * don't count. The default goal is .DEFAULT_GOAL if it's set, otherwise the makefile's first rule
+ * if that comes before the CE toolchain's makefile is included (make starts from the first rule it
+ * reads), otherwise the toolchain's "all".
+ */
+export function makefileGraph(text: string): MakeGraph {
+  const rules = new Map<string, MakeRule>();
+  let current: MakeRule[] = [];
+  let first: string | null = null;
+  let included = false;
+  let defaultGoal: string | null = null;
+  for (const raw of text.replace(/\\\r?\n/g, " ").split(/\r?\n/)) {
+    if (/^\t/.test(raw)) { // a recipe line, for the rules just read
+      const command = raw.trim().replace(/^[@+-]+/, "").replace(/^\$\(Q\)\s*/, "");
+      if (command) for (const r of current) r.recipe.push(command);
+      continue;
+    }
+    const line = raw.replace(/#.*$/, "").trim();
+    if (!line) continue;
+    const goal = /^\.DEFAULT_GOAL\s*:?=\s*(\S+)/.exec(line);
+    if (goal) { defaultGoal = goal[1]; continue; }
+    if (/^-?s?include\b/.test(line)) { if (/cedev-config|makefile\.mk/.test(line)) included = true; current = []; continue; }
+    if (/^(?:ifeq|ifneq|ifdef|ifndef|else|endif|export|override|define|endef|vpath)\b/.test(line)) continue;
+    const m = /^([^=:]+?)\s*::?(?!=)\s*(.*)$/.exec(line);
+    if (!m || /[?+]$/.test(m[1])) { current = []; continue; } // a variable (VAR ?= x, VAR += x, VAR := x)
+    const targets = m[1].split(/\s+/).filter(t => t && !t.startsWith("."));
+    // "target: VAR = value" sets a variable for that target; it isn't a rule of its own.
+    if (/^[A-Za-z_][A-Za-z0-9_]*\s*[?:+]?=/.test(m[2])) { current = []; continue; }
+    const prereqs = m[2].replace(/;.*$/, "").split("|").join(" ").split(/\s+/).filter(Boolean);
+    current = targets.map(t => {
+      const rule = rules.get(t) ?? { prereqs: [], recipe: [] };
+      rule.prereqs.push(...prereqs);
+      rules.set(t, rule);
+      return rule;
+    });
+    const inline = /;\s*(.+)$/.exec(m[2]);
+    if (inline) for (const r of current) r.recipe.push(inline[1]);
+    if (!first && targets.length && !included) first = targets[0];
+  }
+  return { rules, defaultGoal: defaultGoal ?? first ?? "all" };
+}
+
+/** The targets a makefile defines rules for itself. */
+export const makefileRules = (text: string) => [...makefileGraph(text).rules.keys()];
+
+/** Something the browser's make can't do (an app, a shell recipe), as opposed to a build that failed. */
+export class Unsupported extends Error {}
+
 /** Splits flags like a shell would: spaces separate, quotes group. */
 function words(text: string): string[] {
   return [...text.matchAll(/"([^"]*)"|'([^']*)'|(\S+)/g)].map(m => m[1] ?? m[2] ?? m[3]);
@@ -148,13 +203,15 @@ export interface CeBuildResult { ok: boolean; name: string; program?: Uint8Array
  * "makefile"…). Writes each step and its output with `log`. The .8xp is `program`; every file the
  * build made (obj/…, bin/…) is in `files`, by path relative to the project.
  */
-export async function buildCeProject(project: Map<string, Uint8Array>, log: (text: string, err: boolean) => void): Promise<CeBuildResult> {
+export async function buildCeProject(project: Map<string, Uint8Array>, log: (text: string, err: boolean) => void,
+  /** Variables set on make's command line (NAME=X), which win over the makefile's, as in make. */
+  overrides: Record<string, string> = {}): Promise<CeBuildResult> {
   const makefile = [...project.entries()].find(([p]) => /^(gnu)?makefile$/i.test(p))?.[1];
-  const v = { ...makefileVars(makefile ? new TextDecoder().decode(makefile) : "") };
+  const v = { ...makefileVars(makefile ? new TextDecoder().decode(makefile) : ""), ...overrides };
   const yes = (name: string, otherwise: boolean) => (v[name] ? v[name].toUpperCase() === "YES" : otherwise);
   const NAME = v.NAME || "DEMO";
   const SRCDIR = v.SRCDIR || "src";
-  if (yes("APPLICATION", false)) throw new Error("Apps (APPLICATION = YES) build in the desktop app.");
+  if (yes("APPLICATION", false)) throw new Unsupported("it's a Flash app (APPLICATION = YES), which builds in the desktop app");
   if (yes("LTO", true)) log("Link-time optimization is off in the browser: each file is compiled on its own, which can make the program a little bigger.\n", false);
   if (v.ICON || v.DESCRIPTION) log("ICON and DESCRIPTION are left out in the browser (they need convimg).\n", false);
 

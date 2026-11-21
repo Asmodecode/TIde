@@ -30,7 +30,7 @@ import { EXTENSION_SCHEMA, EXTENSION_TYPES, emit, extensionCommands, extensionsF
 import { createExtensionsView } from "./extensions-view";
 import { createPanel } from "./panel";
 import { assemble, programName } from "./spasm";
-import { buildCeProject } from "./cebuild";
+import { runWebMake } from "./webmake";
 import { fs, normalizeName, store, type Entry } from "./store";
 
 (self as unknown as { MonacoEnvironment: object }).MonacoEnvironment = {
@@ -64,6 +64,10 @@ interface Doc {
   write: (source: string) => Promise<void>;
   /** For project files: the text encoding it was read in and is saved in. */
   encoding?: Encoding;
+  /** For project files: the text as it was last read from or written to disk, to tell when it changes there. */
+  disk?: string;
+  /** The disk's newer text, when the file changed there while this tab had unsaved changes. */
+  diskChanged?: string | "deleted";
 }
 
 /** A tab that isn't a text editor: Settings, a TI file's metadata, or a file TIde can't show as text. */
@@ -128,7 +132,7 @@ const calc = createCalc({
   pickRom: () => fs.pickFile("TI-84 Plus CE ROM", ["rom"]),
   pickFiles: () => fs.pickFiles("TI files", SEND_TYPES),
   readFile: path => fs.readBinary(path),
-  openSerial: () => openSerialTab(),
+  serialConnected: (link, portName) => serialView.adopt(link, portName),
   serialDropped: () => serialView.dropped(),
   layout: () => {
     // The calculator takes the editor area, like the docs page; only one of them shows at a time.
@@ -150,7 +154,8 @@ const calc = createCalc({
 const serialView = createSerialView({
   say: text => setMessage(text),
   log: (text, err) => toConsole(text, err ? "err" : "info"),
-  attach: (link, portName) => void calc.attachSerial(link, portName),
+  connect: () => calc.connectReal(),
+  disconnect: () => calc.disconnectReal(),
   pickFiles: () => fs.pickFiles("TI files", SEND_TYPES),
   readFile: path => fs.readBinary(path),
 });
@@ -262,7 +267,8 @@ const assemblesActive = () => {
 };
 
 /** The project's files, by path relative to its root with "/", for the assembler. Leaves out hidden and build folders. */
-async function projectFiles(): Promise<Map<string, Uint8Array>> {
+/** The project's files (or those in its folder `dir`), by path relative to it, for the browser's make. */
+async function projectFiles(dir = ""): Promise<Map<string, Uint8Array>> {
   const out = new Map<string, Uint8Array>();
   const walk = async (dir: string, rel: string) => {
     for (const e of await fs.readDir(dir)) {
@@ -272,7 +278,7 @@ async function projectFiles(): Promise<Map<string, Uint8Array>> {
       else if (!/\.(8x[a-z]|8e[a-z]|b8[34]|rom|zip|exe|png|jpe?g|gif)$/i.test(e.name)) out.set(`${rel}${e.name}`, await fs.readBinary(e.path));
     }
   };
-  await walk(project!.root, "");
+  await walk(dir ? joinPath(project!.root, dir) : project!.root, "");
   return out;
 }
 
@@ -411,6 +417,7 @@ function openText(entry: Entry, text: string, encoding: Encoding) {
     },
   });
   doc.encoding = encoding;
+  doc.disk = text;
   activate(id);
 }
 
@@ -612,7 +619,6 @@ async function loadConfig(exists = true) {
   setProjectSettings(config.editor ?? {});
   if (config.calculator && config.calculator !== getTarget()) setTarget(config.calculator);
   calc.setLink(config.link);
-  serialView.setProjectLink(config.link);
   renderScripts();
   applyEditorMode();
 }
@@ -759,8 +765,18 @@ document.addEventListener("visibilitychange", () => { if (document.hidden) autoS
 
 async function saveDoc(doc: Doc): Promise<boolean> {
   let saved = true;
+  // Changed on disk since it was opened, while it had unsaved changes here: ask before overwriting.
+  if (doc.diskChanged && doc.diskChanged !== "deleted"
+    && !confirm(`${doc.label} changed on disk since TIde read it.\n\nSave your version over it? Cancel keeps both: File → Reload from disk shows the disk's.`)) {
+    return false;
+  }
   try {
-    await doc.write(doc.model.getValue());
+    const text = doc.model.getValue();
+    // Before the write, so the watcher's report of it isn't taken for a change from elsewhere.
+    const before = doc.disk;
+    if (doc.encoding) doc.disk = text;
+    try { await doc.write(text); } catch (err) { doc.disk = before; throw err; }
+    doc.diskChanged = undefined;
     doc.savedVersion = doc.model.getAlternativeVersionId();
     if (doc.language === "tibasic") buildErrors.set(doc.label, tokenize(doc.model.getValue()).errors.length);
     setMessage(`Saved ${doc.label}`);
@@ -796,18 +812,23 @@ async function saveActive() {
 async function buildInBrowser(line: string): Promise<{ ok: boolean; output: string }> {
   panel.show("output");
   let text = "";
-  const run = panel.outputRun("Build", "make (in the browser)", () => {});
+  const run = panel.outputRun("Build", `${line} (in the browser)`, () => {});
   const log = (chunk: string, err: boolean) => { text += chunk; run.write(chunk, err); };
-  if (line.trim() !== "make") {
-    log(`"${line}" is a command line, and the web version can only run the CE toolchain's make. Build it in the desktop app, or remove "build" from .tide/tide.json.\n`, true);
-    run.end(false, 1);
-    return { ok: false, output: text };
-  }
   try {
-    const result = await buildCeProject(await projectFiles(), log);
-    for (const [rel, bytes] of result.files) if (rel.startsWith("bin/")) await fs.writeBinary(joinPath(project!.root, rel), bytes);
+    // Commands joined with && run one after another, as in a shell (webmake.ts).
+    const result = await runWebMake(line, {
+      files: dir => projectFiles(dir),
+      write: (rel, bytes) => fs.writeBinary(joinPath(project!.root, rel), bytes),
+      remove: rel => fs.deletePath(joinPath(project!.root, rel), false).catch(() => { /* not there */ }),
+      log,
+    });
     run.end(result.ok, result.ok ? 0 : 1);
-    if (result.ok) text += `\nbin/${result.name}.8xp\n`;
+    if (result.ok && result.names.length) text += `\n${result.names.join("\n")}\n`;
+    // Last, so the status bar shows it: what the browser left out.
+    if (result.ok && result.skipped.length) {
+      const note = `Left out ${result.skipped.length} step${result.skipped.length === 1 ? "" : "s"} that need${result.skipped.length === 1 ? "s" : ""} a shell or the desktop app (listed in Output).`;
+      log(`${note}\n`, false);
+    }
     return { ok: result.ok, output: text };
   } catch (err) {
     log(`${err instanceof Error ? err.message : err}\n`, true);
@@ -1045,7 +1066,83 @@ async function foldersChanged(dirs: string[]) {
   // Not while a new file's name is being typed: the tree is drawn again when that's done.
   if (stale.length && !creating) renderTree();
   if (changed.has(samePath(joinPath(project.root, CONFIG_DIR)))) await loadConfig();
+  // Open files in those folders: reloaded if they changed there.
+  refreshOpenFiles(changed);
 }
+// ── Open files that change on disk: another program, git, a build, the terminal ──
+// A tab with no unsaved changes takes the new text, keeping its place and undo history. One with
+// unsaved changes keeps them, and says so: saving asks first, and Reload from disk takes the disk's.
+
+/** Where an open file is on disk: its tab's path (a dropped file's, once saved somewhere), or null. */
+const diskPath = (doc: Doc) => {
+  if (!doc.id.startsWith("file:") || !doc.encoding) return null;
+  const path = doc.hint ?? doc.id.slice(5);
+  return path.startsWith(DROPPED) ? null : path;
+};
+
+/** Reads an open file again and brings its tab up to date with the disk. */
+async function reloadFromDisk(doc: Doc, force = false) {
+  const path = diskPath(doc);
+  if (!path) return;
+  let text: string;
+  try {
+    text = decodeWith(await fs.readBinary(path), doc.encoding!);
+  } catch {
+    if (doc.diskChanged === "deleted" || docs.get(doc.id) !== doc) return;
+    doc.diskChanged = "deleted";
+    setMessage(`${doc.label} was deleted or moved outside TIde. Its tab stays open; saving writes it again.`);
+    return;
+  }
+  if (docs.get(doc.id) !== doc) return; // closed meanwhile
+  if (doc.diskChanged === "deleted") doc.diskChanged = undefined;
+  if (text === doc.disk && !force) return;
+  if (isDirty(doc) && !force) {
+    if (doc.diskChanged === text) return;
+    doc.diskChanged = text;
+    setMessage(`${doc.label} changed on disk. Your unsaved changes are kept: saving asks before overwriting, and File → Reload from disk takes the disk's version.`);
+    return;
+  }
+  // In place, as one edit: the cursor, scroll and undo history stay.
+  const showing = active === doc.id;
+  const view = showing ? editor.saveViewState() : null;
+  doc.model.pushEditOperations([], [{ range: doc.model.getFullModelRange(), text }], () => null);
+  doc.disk = text;
+  doc.diskChanged = undefined;
+  doc.savedVersion = doc.model.getAlternativeVersionId();
+  if (view) editor.restoreViewState(view);
+  setMessage(`Reloaded ${doc.label}: it changed on disk.`);
+  refresh();
+}
+
+/** Brings open files up to date: those in `dirs` (folders a change was reported in), or all of them. */
+function refreshOpenFiles(dirs?: Set<string>) {
+  for (const doc of [...docs.values()]) {
+    const path = diskPath(doc);
+    if (!path || (dirs && !dirs.has(samePath(parentOf(path))))) continue;
+    void reloadFromDisk(doc);
+  }
+}
+
+// The web version has no folder watching: a real folder (not one kept in the browser, which only
+// TIde changes) is looked at again every couple of seconds while TIde shows, and when it gets focus.
+if (fs.web) {
+  const look = async () => {
+    if (!project || project.root.startsWith("/Browser/") || document.hidden) return;
+    let changed = false;
+    await Promise.all([...dirCache.keys()].map(async dir => {
+      try {
+        const now = await fs.readDir(dir);
+        const was = dirCache.get(dir) ?? [];
+        if (now.length !== was.length || now.some((e, i) => e.name !== was[i]?.name || e.isDir !== was[i]?.isDir)) { dirCache.set(dir, now); changed = true; }
+      } catch { /* gone, or not allowed now */ }
+    }));
+    if (changed && !creating) renderTree();
+    refreshOpenFiles();
+  };
+  window.setInterval(() => void look(), 2500);
+  window.addEventListener("focus", () => void look());
+}
+
 if (fs.desktop) {
   import("@tauri-apps/api/event")
     .then(({ listen }) => listen<{ dirs: string[] }>("folder://changed", e => void foldersChanged(e.payload.dirs)))
@@ -1953,9 +2050,15 @@ $("file-menu").addEventListener("click", e => {
     { label: "Open folder…", shortcut: "Ctrl+Shift+O", run: () => void openFolder() },
     ...(fs.web ? [{ label: "Open browser project…", run: () => void openBrowserProject() }] : []),
     { label: "Send files to calculator…", run: () => { void calc.show().then(() => $("calc-send").click()); } },
+    { label: "Connect a calculator…", run: () => void calc.connectReal() },
     { label: "Serial cable…", run: () => openSerialTab() },
     "-",
     { label: "Save", shortcut: "Ctrl+S", disabled: !doc, run: () => void saveActive() },
+    { label: "Reload from disk", disabled: !doc?.id.startsWith("file:") || !doc.encoding, run: () => {
+      if (!doc) return;
+      if (isDirty(doc) && !confirm(`Reload ${doc.label} from disk? Your unsaved changes in it are lost.`)) return;
+      void reloadFromDisk(doc, true);
+    } },
     { label: "Save all", disabled: ![...docs.values()].some(isDirty), run: () => { for (const d of docs.values()) if (isDirty(d)) void saveDoc(d); } },
     { label: "Auto save", checked: settings().autoSave, run: () => {
       const on = !settings().autoSave;
