@@ -9,6 +9,7 @@ import { json as monacoJson, typescript as monacoTs } from "monaco-editor";
 import { languageFor, registerTiBasic, tiCatalog } from "./language";
 import { applyIndentation, registerIndentation } from "./indent";
 import { isLight, watchTheme } from "./theme";
+import { createSerialView } from "./serial-view";
 import { TARGETS, getTarget, onTargetChange, setTarget } from "./target";
 import { C_CATALOG } from "./c-support";
 import { PY_CATALOG, watchPython } from "./py2ez80-support";
@@ -114,6 +115,8 @@ docsEl.hidden = false;
 const docsView = createDocs(docsEl);
 /** The docs tab's id. */
 const DOCS_TAB = "view:docs";
+/** The Serial tab's id: a calculator on a serial cable (serial-view.ts). */
+const SERIAL_TAB = "view:serial";
 
 // The calculator's console lines also go to the Console tab under the editor. The calculator starts
 // before that panel exists, so its first lines wait here.
@@ -125,6 +128,8 @@ const calc = createCalc({
   pickRom: () => fs.pickFile("TI-84 Plus CE ROM", ["rom"]),
   pickFiles: () => fs.pickFiles("TI files", SEND_TYPES),
   readFile: path => fs.readBinary(path),
+  openSerial: () => openSerialTab(),
+  serialDropped: () => serialView.dropped(),
   layout: () => {
     // The calculator takes the editor area, like the docs page; only one of them shows at a time.
     // and it has its own tab: showing it opens the tab, hiding it while its tab is active closes the tab.
@@ -140,6 +145,18 @@ const calc = createCalc({
     } else if (active === CALC_TAB) closeTab(CALC_TAB);
   },
 });
+
+// The Serial tab: a calculator on a serial cable. While it's connected, the calculator panel uses it too.
+const serialView = createSerialView({
+  say: text => setMessage(text),
+  log: (text, err) => toConsole(text, err ? "err" : "info"),
+  attach: (link, portName) => void calc.attachSerial(link, portName),
+  pickFiles: () => fs.pickFiles("TI files", SEND_TYPES),
+  readFile: path => fs.readBinary(path),
+});
+function openSerialTab() {
+  openView({ id: SERIAL_TAB, label: "Serial", hint: "A calculator on a serial cable (TI-Graph Link)", el: serialView.el });
+}
 
 const scm = createScm({
   root: () => project?.root ?? null,
@@ -595,6 +612,7 @@ async function loadConfig(exists = true) {
   setProjectSettings(config.editor ?? {});
   if (config.calculator && config.calculator !== getTarget()) setTarget(config.calculator);
   calc.setLink(config.link);
+  serialView.setProjectLink(config.link);
   renderScripts();
   applyEditorMode();
 }
@@ -1935,6 +1953,7 @@ $("file-menu").addEventListener("click", e => {
     { label: "Open folder…", shortcut: "Ctrl+Shift+O", run: () => void openFolder() },
     ...(fs.web ? [{ label: "Open browser project…", run: () => void openBrowserProject() }] : []),
     { label: "Send files to calculator…", run: () => { void calc.show().then(() => $("calc-send").click()); } },
+    { label: "Serial cable…", run: () => openSerialTab() },
     "-",
     { label: "Save", shortcut: "Ctrl+S", disabled: !doc, run: () => void saveActive() },
     { label: "Save all", disabled: ![...docs.values()].some(isDirty), run: () => { for (const d of docs.values()) if (isDirty(d)) void saveDoc(d); } },

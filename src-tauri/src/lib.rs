@@ -175,6 +175,7 @@ pub fn run() {
             serial::serial_ports,
             serial::serial_open,
             serial::serial_close,
+            serial::serial_signals,
             serial::serial_write,
             serial::serial_read,
             watch::watch_folder

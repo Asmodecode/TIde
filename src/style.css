@@ -271,10 +271,6 @@ body { font: 13px/1.4 var(--ui); background: var(--body); color: var(--ink); ove
 .calc-setup button.quiet { color: var(--ink); background: var(--body); border: 1px solid var(--rule); font-weight: 400; }
 .calc-setup button.quiet:hover { border-color: var(--key); }
 .calc-setup p { white-space: pre-line; }
-.calc-serial { display: grid; grid-template-columns: auto 1fr; gap: 8px 10px; align-items: center; }
-.calc-serial[hidden], .calc-serial select[hidden] { display: none; }
-.calc-serial label { display: contents; font-size: 12.5px; color: var(--muted); }
-.calc-serial select { font: inherit; font-size: 13px; color: var(--ink); background: var(--body); border: 1px solid var(--rule); border-radius: 3px; padding: 4px 6px; }
 .calc-body { flex: 1; min-height: 0; overflow: auto; display: grid; grid-template-columns: repeat(2, var(--pane-w, 420px)); grid-auto-rows: var(--pane-h, 340px); justify-content: center; align-content: center; gap: 24px; padding: 20px 24px 8px; }
 .calc-body.stacked { grid-template-columns: var(--pane-w, 420px); }
 .calc-lcd-area { display: grid; place-items: center; min-width: 0; }
@@ -466,3 +462,44 @@ body { font: 13px/1.4 var(--ui); background: var(--body); color: var(--ink); ove
 .status .status-panel { display: inline-flex; align-items: center; gap: 4px; }
 .status .status-panel svg { width: 14px; height: 14px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
 .status .status-panel[aria-pressed="true"] { background: rgba(255, 255, 255, .2); }
+
+/* The desktop app's device chooser (chooser.ts), in the update dialog's frame */
+.chooser .hint { margin: 4px 0 12px; }
+.chooser-list { display: flex; flex-direction: column; gap: 2px; min-height: 120px; max-height: 300px; overflow-y: auto; padding: 4px; margin-bottom: 14px; background: var(--panel); border: 1px solid var(--rule); border-radius: 4px; outline: none; }
+.chooser-list:focus-visible { border-color: var(--key); }
+.chooser-item { display: flex; flex-direction: column; gap: 1px; padding: 6px 10px; border-radius: 3px; cursor: pointer; }
+.chooser-item:hover { background: var(--body); }
+.chooser-item[aria-selected="true"] { background: var(--key-wash); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--key) 45%, transparent); }
+.chooser-item strong { font: 600 13px var(--ui); }
+.chooser-item span { font-size: 11.5px; color: var(--muted); }
+.chooser-empty { margin: auto; padding: 20px; text-align: center; color: var(--muted); font-size: 12.5px; }
+.chooser .actions .spacer { flex: 1; }
+
+/* The Serial tab (serial-view.ts) */
+.serial-view { max-width: 760px; padding: 18px 24px 40px; color: var(--ink); }
+.serial-view h1 { font: 600 20px var(--ui); margin-bottom: 6px; }
+.serial-view h2 { font: 600 14px var(--ui); color: var(--muted); margin: 22px 0 6px; padding-bottom: 4px; border-bottom: 1px solid var(--rule); }
+.serial-intro { margin-bottom: 14px; }
+.serial-row { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; }
+.serial-row label { display: flex; align-items: center; gap: 8px; font-size: 12.5px; color: var(--muted); }
+.serial-view select { font: inherit; font-size: 13px; color: var(--ink); background: var(--body); border: 1px solid var(--rule); border-radius: 3px; padding: 4px 6px; }
+.serial-view button { font: inherit; font-size: 13px; color: var(--ink); background: var(--body); border: 1px solid var(--rule); border-radius: 3px; padding: 6px 12px; cursor: pointer; }
+.serial-view button:hover:not(:disabled) { border-color: var(--key); }
+.serial-view button.primary { color: var(--navy); background: var(--key); border-color: var(--key); font-weight: 600; }
+.serial-view button:disabled { opacity: .5; cursor: default; }
+.serial-status { margin: 12px 0 0; padding: 8px 12px; font-size: 12.5px; color: var(--muted); background: var(--panel); border: 1px solid var(--rule); border-left: 3px solid var(--rule); border-radius: 3px; }
+.serial-status.on { color: var(--ink); border-left-color: var(--ok); }
+.serial-send { display: flex; flex-direction: column; gap: 10px; margin-top: 16px; align-items: flex-start; }
+.serial-drop { align-self: stretch; display: flex; flex-direction: column; align-items: center; gap: 2px; padding: 22px; text-align: center; color: var(--muted); border: 2px dashed var(--rule); border-radius: 8px; }
+.serial-drop strong { font: 600 13.5px var(--ui); color: var(--ink); }
+.serial-drop span { font-size: 12px; }
+.serial-drop.over { border-color: var(--key); background: var(--key-wash); }
+.serial-drop.off { opacity: .55; }
+.serial-sent { list-style: none; display: flex; flex-direction: column; gap: 2px; }
+.serial-sent:empty::before { content: "Nothing yet."; color: var(--muted); font-size: 12.5px; }
+.serial-sent li { display: grid; grid-template-columns: minmax(0, 14em) 1fr auto; gap: 12px; padding: 5px 8px; font-size: 12.5px; border-radius: 3px; background: var(--panel); }
+.serial-sent .name { font-family: var(--mono); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.serial-sent li.ok .what { color: var(--ok); }
+.serial-sent li.err .what { color: var(--danger); }
+.serial-sent time { color: var(--muted); font-size: 11.5px; }
+.serial-notes { margin: 22px 0 0 18px; display: flex; flex-direction: column; gap: 3px; }

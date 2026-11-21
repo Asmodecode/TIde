@@ -8,8 +8,7 @@
 // It also offers a real calculator, plugged in over USB: files go to it with TILP's libraries (link.ts).
 import { fs } from "./store";
 import { connect, linkSupport, type Connected } from "./link";
-import { DBUS_MODELS, DbusLink, modelFamily, type DbusModel } from "./dbus";
-import { listPorts, openPort, serialSupport } from "./serial";
+import { modelFamily, type DbusLink } from "./dbus";
 import { probeEvo } from "./evo";
 
 const $ = <T extends HTMLElement>(id: string) => document.getElementById(id) as T;
@@ -209,8 +208,10 @@ export interface Calc {
   macro(name: string, arg: string): Promise<void>;
   /** Sends any TI files, unpacking bundles. */
   send(files: TiFile[]): Promise<void>;
-  /** The open project's "link" settings from tide.json: which cable, port and calculator. */
+  /** The open project's "link" settings from tide.json: which cable it uses. */
   setLink(link: { via?: "usb" | "serial"; port?: string; model?: string } | undefined): void;
+  /** Uses the Serial tab's connection for Run and Send, or stops using it (null). */
+  attachSerial(link: DbusLink | null, portName: string): Promise<void>;
 }
 
 const sleep = (ms: number) => new Promise(r => window.setTimeout(r, ms));
@@ -223,6 +224,10 @@ export function createCalc(opts: {
   pickFiles: () => Promise<string[]>;
   readFile: (path: string) => Promise<Uint8Array>;
   layout: () => void;
+  /** Opens the Serial tab, where a serial cable connects. */
+  openSerial?: () => void;
+  /** The panel stopped using the Serial tab's connection (another calculator was picked). */
+  serialDropped?: () => void;
   /** Gets every console line, for the Console tab in the panel under the editor. */
   onLog?: (text: string, kind: "out" | "err" | "info" | "emu") => void;
 }): Calc {
@@ -234,9 +239,6 @@ export function createCalc(opts: {
     setupText: $("calc-setup-text"),
     rom: $<HTMLButtonElement>("calc-rom"),
     connect: $<HTMLButtonElement>("calc-connect"),
-    serialForm: $("calc-serial"),
-    serialModel: $<HTMLSelectElement>("calc-serial-model"),
-    serialPort: $<HTMLSelectElement>("calc-serial-port"),
     disconnect: $<HTMLButtonElement>("calc-disconnect"),
     screen: $("calc-screen"),
     lcd: $<HTMLCanvasElement>("calc-lcd"),
@@ -420,7 +422,8 @@ export function createCalc(opts: {
     ui.rom.hidden = button !== "rom";
     ui.connect.hidden = button !== "connect";
     ui.disconnect.hidden = button !== "disconnect";
-    ui.serialForm.hidden = !(choice === "serial" && button === "connect");
+    // For the serial cable, the button opens the Serial tab, where the connection is made.
+    ui.connect.textContent = choice === "serial" ? "Open the Serial tab" : "Connect…";
     ui.screen.hidden = !!text;
     ui.reset.hidden = ui.reload.hidden = isReal(choice);
   }
@@ -707,29 +710,10 @@ export function createCalc(opts: {
     }
   }
 
-  // ── A real calculator, over a serial cable: TIde's own link protocol (dbus.ts) ──
-  const SERIAL_PREF = "tide-pref-calc-serial";
-  let serialChoice: { model: DbusModel; port: string } = { model: "TI-84 Plus", port: "" };
-  try { serialChoice = { ...serialChoice, ...JSON.parse(localStorage.getItem(SERIAL_PREF) ?? "{}") }; } catch { /* storage unavailable or bad JSON */ }
-  /** What tide.json's "link" sets, over what was picked last. */
-  let projectLink: { model?: DbusModel; port?: string } = {};
+  // ── A real calculator, over a serial cable: TIde's own link protocol (dbus.ts), connected in
+  // the Serial tab (serial-view.ts), which hands the connection over with attachSerial() ──
   let serialName = "";
-
-  async function fillSerialForm() {
-    const model = projectLink.model ?? serialChoice.model;
-    ui.serialModel.replaceChildren(...DBUS_MODELS.map(m => Object.assign(document.createElement("option"), { value: m, textContent: m })));
-    ui.serialModel.value = model;
-    const ports = await listPorts().catch(err => { log(`Couldn't list the serial ports: ${err}`, "err"); return [] as { path: string; description: string }[]; });
-    ui.serialPort.hidden = ports === null;
-    if (ports) {
-      const want = projectLink.port ?? serialChoice.port;
-      const options = ports.map(p => Object.assign(document.createElement("option"), { value: p.path, textContent: p.description ? `${p.path}: ${p.description}` : p.path }));
-      // A port tide.json names that isn't plugged in still shows, so it's clear what's missing.
-      if (want && !ports.some(p => p.path === want)) options.push(Object.assign(document.createElement("option"), { value: want, textContent: `${want} (not found)` }));
-      ui.serialPort.replaceChildren(...(options.length ? options : [Object.assign(document.createElement("option"), { value: "", textContent: "No serial ports found" })]));
-      if (want) ui.serialPort.value = want;
-    }
-  }
+  let serialLink: DbusLink | null = null;
 
   function serialEngine(l: DbusLink): Engine {
     const notHere = (what: string) => async () => { throw new Error(`${what} works in the emulator. On a real calculator, use its keys.`); };
@@ -739,42 +723,12 @@ export function createCalc(opts: {
       key: () => {},
       send: file => l.sendFile(file.name, file.bytes),
       reset: () => {},
-      stop: () => { void l.close(); },
+      // Picking another calculator gives the connection back to the Serial tab, which closes it.
+      stop: () => { if (serialLink === l) { serialLink = null; opts.serialDropped?.(); } },
       async launch(name) { throw new Error(`Start it on the calculator: prgm, then ${name.toUpperCase()}.`); },
       type: notHere("key.type"),
       openApp: notHere("app.open"),
     };
-  }
-
-  async function connectSerial() {
-    const model = ui.serialModel.value as DbusModel;
-    const port = ui.serialPort.hidden ? null : ui.serialPort.value;
-    ui.connect.disabled = true;
-    ui.state.textContent = "connecting…";
-    try {
-      // In a browser the port is picked in its chooser, which needs this click.
-      const byteLink = await openPort(port);
-      const l = new DbusLink(byteLink, model, text => log(text, "info"));
-      try {
-        await l.check();
-      } catch (err) {
-        await l.close().catch(() => {});
-        throw err;
-      }
-      serialChoice = { model, port: port ?? "" };
-      remember(SERIAL_PREF, serialChoice);
-      serialName = byteLink.name;
-      engine = serialEngine(l);
-      sentLibs.clear();
-      setCredit();
-      showLinked();
-      say(model === "TI-82" ? `Ready to send to the TI-82 on ${byteLink.name}. Start Link > Receive on it before each send.` : `Connected to the ${model} on ${byteLink.name}.`);
-    } catch (err) {
-      ui.state.textContent = "";
-      say(err instanceof Error ? err.message : String(err));
-    } finally {
-      ui.connect.disabled = false;
-    }
   }
 
   async function connectEvo() {
@@ -804,9 +758,7 @@ export function createCalc(opts: {
     if (choice === "serial") {
       setCredit();
       if (engine?.kind === "serial") { showLinked(); return true; }
-      const problem = serialSupport();
-      if (!problem) await fillSerialForm();
-      setup(problem ?? "Connect the calculator's link port to a serial port with TI's grey TI-Graph Link (or a USB-to-serial adapter and one), and pick the calculator and port.\nThe TI-83 Plus, 84 Plus, 83 and 73 take files at the home screen; on a TI-82, start Link > Receive first. The CE family has only USB: use \"Real calculator (USB)\" for it.", problem ? null : "connect");
+      setup("A calculator on a serial cable (TI's grey TI-Graph Link) connects in the Serial tab. Once it's connected there, Run and Send here go to it too.", "connect");
       ui.state.textContent = "";
       return false;
     }
@@ -908,7 +860,7 @@ export function createCalc(opts: {
     if (value !== choice) await choose(value);
   });
   ui.rom.addEventListener("click", () => void addRom());
-  ui.connect.addEventListener("click", () => void (choice === "serial" ? connectSerial() : choice === "evo" ? connectEvo() : connectUsb()));
+  ui.connect.addEventListener("click", () => void (choice === "serial" ? opts.openSerial?.() : choice === "evo" ? connectEvo() : connectUsb()));
   ui.disconnect.addEventListener("click", async () => {
     await stop();
     say("Disconnected the calculator.");
@@ -964,11 +916,24 @@ export function createCalc(opts: {
       else if (sendable.length) say(`Sent ${sendable.length === 1 ? sendable[0].name : `${sendable.length} files`} to the ${engine.model}.`);
     },
     setLink(cfg) {
-      projectLink = { port: cfg?.port, model: DBUS_MODELS.find(m => m === cfg?.model) };
-      if (cfg?.model && !projectLink.model) say(`tide.json's link.model "${cfg.model}" isn't one TIde's serial link knows: ${DBUS_MODELS.join(", ")}.`);
       // A project that says which cable it uses switches the calculator to it, unless that's already the choice.
       if (cfg?.via && cfg.via !== choice) void choose(cfg.via);
-      else if (choice === "serial" && !engine && !ui.serialForm.hidden) void fillSerialForm();
+    },
+    async attachSerial(l, portName) {
+      if (!l) {
+        if (engine?.kind === "serial") { serialLink = null; engine = null; if (!ui.panel.hidden) void ready(); }
+        return;
+      }
+      if (engine && engine.kind !== "serial") await stop();
+      choice = "serial";
+      remember(MODEL_PREF, choice);
+      fillMenu(known);
+      serialLink = l;
+      serialName = portName;
+      engine = serialEngine(l);
+      sentLibs.clear();
+      setCredit();
+      if (!ui.panel.hidden) showLinked();
     },
     async macro(name, arg) {
       await view.show();

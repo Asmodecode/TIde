@@ -1,11 +1,13 @@
 // WebUSB for the calculator link (link.ts). WebTILP's library uses libusb, whose WebAssembly
 // build talks to devices through the browser's navigator.usb.
 // - In the desktop app the web view has no WebUSB, so installUsbShim() gives the page one, backed by
-//   the app's USB commands (src-tauri/src/link.rs): TI's devices only, chosen without a dialog.
+//   the app's USB commands (src-tauri/src/link.rs): TI's devices only, picked in TIde's own chooser
+//   (chooser.ts), as a browser would ask.
 // - Everywhere, withReadTimeouts() gives a device's reads a time limit. libusb can't cancel a WebUSB
 //   read, so one the calculator never answers would wait forever; this ends it after a while with no
 //   data, and keeps it, so data that arrives later goes to the next read instead of being lost.
 import { invoke } from "@tauri-apps/api/core";
+import { chooseDevice } from "./chooser";
 
 const TI = 0x0451;
 /** Longer than TILP's own time limits, so it gives up first, as with a real cable. */
@@ -116,11 +118,27 @@ export function installUsbShim() {
   };
   const usb = {
     async getDevices() { await list(); return [...granted]; },
-    /** There's no chooser: the first TI device that matches. */
+    /** TIde's chooser, in place of the browser's: the TI devices that match the filters. */
     async requestDevice(options: { filters?: { vendorId?: number; productId?: number }[] } = {}) {
       const filters = options.filters?.length ? options.filters : [{}];
-      const device = (await list()).find(d => filters.some(f => (f.vendorId ?? d.vendorId) === d.vendorId && (f.productId ?? d.productId) === d.productId));
-      if (!device) throw Object.assign(new Error("No calculator or link cable is plugged in."), { name: "NotFoundError" });
+      const matching = async () => (await list()).filter(d => filters.some(f => (f.vendorId ?? d.vendorId) === d.vendorId && (f.productId ?? d.productId) === d.productId));
+      const hex = (n: number) => n.toString(16).padStart(4, "0");
+      let shown: AppUsbDevice[] = [];
+      const id = await chooseDevice({
+        title: "Connect to a calculator",
+        hint: "Pick the calculator, or the SilverLink cable, plugged in over USB. On Windows it needs the WinUSB driver (install it with Zadig, as for TILP).",
+        empty: "No TI calculator or link cable is plugged in. Plug it in and turn it on, then Refresh.",
+        list: async () => {
+          shown = await matching();
+          return shown.map(d => ({
+            id: d.info.id,
+            label: d.productName ?? "TI device",
+            detail: `USB ${hex(d.vendorId)}:${hex(d.productId)}${d.serialNumber ? `, serial ${d.serialNumber}` : ""}`,
+          }));
+        },
+      });
+      const device = shown.find(d => d.info.id === id);
+      if (!device) throw Object.assign(new Error("No calculator was chosen."), { name: "NotFoundError" });
       granted.add(device);
       return device;
     },
