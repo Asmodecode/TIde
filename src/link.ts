@@ -77,10 +77,11 @@ function load(log: (text: string, err: boolean) => void): Promise<TILibs> {
 let previous: Connected | null = null;
 
 /**
- * Picks a calculator or cable and connects to it. Call it straight from a click: a browser only
- * shows its device chooser for one.
+ * Connects to a calculator or SilverLink cable: `picked`, chosen in the connections popup
+ * (connections.ts), or otherwise one asked for now, which needs a click: a browser only shows its
+ * device chooser for one.
  */
-export async function connect(log: (text: string, err: boolean) => void): Promise<Connected> {
+export async function connect(log: (text: string, err: boolean) => void, picked?: USBDeviceLike): Promise<Connected> {
   const problem = linkSupport();
   if (problem) throw new Error(problem);
   const usb = (navigator as unknown as { usb: {
@@ -90,7 +91,7 @@ export async function connect(log: (text: string, err: boolean) => void): Promis
     removeEventListener(type: string, listener: (e: unknown) => void): void;
   } }).usb;
   // Before anything else is awaited, while the click still counts.
-  const chosen = usb.requestDevice({ filters: [{ vendorId: TI }] });
+  const chosen = picked ? Promise.resolve(picked) : usb.requestDevice({ filters: [{ vendorId: TI }] });
   const lib = await load(log);
   let device: USBDeviceLike;
   try { device = await chosen; } catch (err) {
@@ -163,4 +164,4 @@ export async function connect(log: (text: string, err: boolean) => void): Promis
   return link;
 }
 
-interface USBDeviceLike { productId: number; productName?: string; transferIn(endpoint: number, length: number): Promise<unknown> }
+export interface USBDeviceLike { vendorId: number; productId: number; productName?: string; serialNumber?: string; transferIn(endpoint: number, length: number): Promise<unknown> }

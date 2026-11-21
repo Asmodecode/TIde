@@ -102,7 +102,9 @@ class AppUsbDevice {
 
 /** Gives the desktop app's page a navigator.usb for TI's devices. */
 export function installUsbShim() {
-  if ((navigator as { usb?: unknown }).usb) return;
+  // TIde's own, always: the app's web view may have a navigator.usb of its own that can't list or
+  // reach any device (it has no chooser to grant one), which would hide every calculator.
+  if ((navigator as { usb?: { tideListAll?: unknown } }).usb?.tideListAll) return;
   const known = new Map<string, AppUsbDevice>();
   const granted = new Set<AppUsbDevice>();
   const listeners = new Map<string, Set<(e: unknown) => void>>();
@@ -118,6 +120,11 @@ export function installUsbShim() {
   };
   const usb = {
     async getDevices() { await list(); return [...granted]; },
+    /**
+     * TIde's own, for the connections popup (connections.ts): every TI device plugged in, granted
+     * as it's listed. A browser can't list devices it wasn't given; the app can.
+     */
+    async tideListAll() { const all = await list(); for (const d of all) granted.add(d); return all; },
     /** TIde's chooser, in place of the browser's: the TI devices that match the filters. */
     async requestDevice(options: { filters?: { vendorId?: number; productId?: number }[] } = {}) {
       const filters = options.filters?.length ? options.filters : [{}];

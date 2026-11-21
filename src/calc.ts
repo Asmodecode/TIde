@@ -5,11 +5,15 @@
 //   and 86, which runs a frame at a time on TIde's timer and sends files over its link at once.
 // The model menu on the calculator bar picks one: the CE, or any ROM you've added for the others.
 // Both draw to the same canvas and share one keypad, relabelled for the TI-85 and 86.
-// It also offers a real calculator, plugged in over USB: files go to it with TILP's libraries (link.ts).
+// It also offers a real calculator: Connect opens the connections popup (connections.ts), which lists
+// every way to reach one, over USB (TILP's libraries, link.ts) or a serial cable (TIde's own link,
+// dbus.ts).
 import { fs } from "./store";
-import { connect, linkSupport, type Connected } from "./link";
-import { modelFamily, type DbusLink } from "./dbus";
-import { probeEvo } from "./evo";
+import { connect, type Connected, type USBDeviceLike } from "./link";
+import { DbusLink, detectModel, modelFamily } from "./dbus";
+import { describeDevice } from "./evo";
+import { chooseConnection } from "./connections";
+import { openSerialPort } from "./serial";
 
 const $ = <T extends HTMLElement>(id: string) => document.getElementById(id) as T;
 
@@ -192,6 +196,8 @@ interface Engine {
   type(text: string): Promise<void>;
   /** Opens an app by name, as app.open does. */
   openApp(name: string): Promise<void>;
+  /** Presses a key by name, as key.press does, where the engine does it itself (a real calculator). */
+  press?(name: string): Promise<void>;
 }
 
 export interface Calc {
@@ -210,13 +216,15 @@ export interface Calc {
   send(files: TiFile[]): Promise<void>;
   /** The open project's "link" settings from tide.json: which cable it uses. */
   setLink(link: { via?: "usb" | "serial"; port?: string; model?: string } | undefined): void;
-  /** Uses the Serial tab's connection for Run and Send, or stops using it (null). */
-  attachSerial(link: DbusLink | null, portName: string): Promise<void>;
+  /** Opens the connections popup and connects what's picked (switching to the real calculator). */
+  connectReal(): Promise<void>;
+  /** Ends the real calculator's connection. */
+  disconnectReal(): Promise<void>;
 }
 
 const sleep = (ms: number) => new Promise(r => window.setTimeout(r, ms));
 /** A real calculator rather than an emulator: a menu choice or an engine's kind. */
-const isReal = (kind: string) => kind === "usb" || kind === "serial" || kind === "evo";
+const isReal = (kind: string) => kind === "real" || kind === "usb" || kind === "serial";
 
 export function createCalc(opts: {
   say: (text: string) => void;
@@ -224,9 +232,9 @@ export function createCalc(opts: {
   pickFiles: () => Promise<string[]>;
   readFile: (path: string) => Promise<Uint8Array>;
   layout: () => void;
-  /** Opens the Serial tab, where a serial cable connects. */
-  openSerial?: () => void;
-  /** The panel stopped using the Serial tab's connection (another calculator was picked). */
+  /** A serial cable connected, for the Serial tab to show and send over. */
+  serialConnected?: (link: DbusLink, portName: string) => void;
+  /** The serial cable's connection ended. */
   serialDropped?: () => void;
   /** Gets every console line, for the Console tab in the panel under the editor. */
   onLog?: (text: string, kind: "out" | "err" | "info" | "emu") => void;
@@ -395,9 +403,11 @@ export function createCalc(opts: {
   const files = (): Promise<Files> => fs.calc.files();
   const read = (name: string) => fs.calc.read(name);
   const MODEL_PREF = "tide-pref-calc-model", NAMES_PREF = "tide-pref-calc-rom-models";
-  /** "ce"; a real calculator: "usb", "serial" or "evo"; or "rom:" and a stored ROM's file name. */
+  /** "ce"; "real", a real calculator; or "rom:" and a stored ROM's file name. */
   let choice = "ce";
   try { choice = localStorage.getItem(MODEL_PREF) ?? "ce"; } catch { /* storage unavailable */ }
+  // 1.7.0 had a choice for each cable; one connects them all now.
+  if (choice === "usb" || choice === "serial" || choice === "evo") choice = "real";
   /** The model each stored ROM turned out to be, for the menu. */
   let romModels: Record<string, string> = {};
   try { romModels = JSON.parse(localStorage.getItem(NAMES_PREF) ?? "{}"); } catch { /* storage unavailable or bad JSON */ }
@@ -408,7 +418,7 @@ export function createCalc(opts: {
     const roms = have?.roms ?? (choice.startsWith("rom:") ? [choice.slice(4)] : []);
     const options: [string, string][] = [["ce", "TI-84 Plus CE"], ...roms.map(n => [`rom:${n}`, romModels[n] ? `${romModels[n]} (${n})` : n] as [string, string])];
     if (choice.startsWith("rom:") && !roms.includes(choice.slice(4)) && have) choice = "ce";
-    options.push(["usb", "Real calculator (USB)"], ["serial", "Real calculator (serial cable)"], ["evo", "TI-84 Evo (USB, first steps)"], ["add", "Add a ROM…"]);
+    options.push(["real", "Real calculator"], ["add", "Add a ROM…"]);
     if (choice.startsWith("rom:")) options.push(["remove", `Remove ${choice.slice(4)}…`]);
     ui.model.replaceChildren(...options.map(([value, label]) => Object.assign(document.createElement("option"), { value, textContent: label })));
     ui.model.value = choice;
@@ -422,8 +432,6 @@ export function createCalc(opts: {
     ui.rom.hidden = button !== "rom";
     ui.connect.hidden = button !== "connect";
     ui.disconnect.hidden = button !== "disconnect";
-    // For the serial cable, the button opens the Serial tab, where the connection is made.
-    ui.connect.textContent = choice === "serial" ? "Open the Serial tab" : "Connect…";
     ui.screen.hidden = !!text;
     ui.reset.hidden = ui.reload.hidden = isReal(choice);
   }
@@ -679,16 +687,21 @@ export function createCalc(opts: {
 
   function showLinked() {
     if (!engine || !isReal(engine.kind)) return;
-    setup(`Connected to the ${engine.model} over ${engine.kind === "usb" ? "USB" : `the serial cable (${serialName})`}.\nSend files to it, or build and run: programs arrive on the calculator, ready to start from its prgm menu.\nKeep it on the home screen while files are sent.`, "disconnect");
+    const serial = engine.kind === "serial";
+    const runs = serial && serialLink?.remote
+      ? "Run sends the program and starts it on the calculator, pressing its keys over the cable; key.press, key.type and app.open in tide.json do too."
+      : "Run sends the program; start it from the calculator's prgm menu.";
+    setup(`Connected to the ${engine.model} over ${serial ? `the serial cable (${serialName})` : "USB"}.\nSend files to it, or build and run. ${runs}\nKeep it on the home screen while files are sent.`, "disconnect");
     ui.state.textContent = "connected";
   }
 
   /** From a click on Connect: the browser only asks which device to use during one. */
-  async function connectUsb() {
+  async function connectUsb(device: USBDeviceLike) {
     ui.connect.disabled = true;
     ui.state.textContent = "connecting…";
     try {
-      const l = await connect((text, err) => log(text.replace(/\n$/, ""), err ? "err" : "info"));
+      if (engine) await stop();
+      const l = await connect((text, err) => log(text.replace(/\n$/, ""), err ? "err" : "info"), device);
       link = l;
       engine = usbEngine(l);
       sentLibs.clear();
@@ -697,7 +710,7 @@ export function createCalc(opts: {
         link = null;
         if (engine && isReal(engine.kind)) engine = null;
         say("The calculator was unplugged.");
-        if (choice === "usb") void ready();
+        if (choice === "real") void ready();
       });
       setCredit();
       showLinked();
@@ -716,26 +729,61 @@ export function createCalc(opts: {
   let serialLink: DbusLink | null = null;
 
   function serialEngine(l: DbusLink): Engine {
-    const notHere = (what: string) => async () => { throw new Error(`${what} works in the emulator. On a real calculator, use its keys.`); };
+    // Over the cable, TIde presses the calculator's keys itself (remote control, as TILP does).
     return {
       kind: "serial", model: l.model, family: modelFamily(l.model), layout: LAYOUT_CE, width: 320, height: 240,
       frame: () => false,
-      key: () => {},
+      key: (k, down) => { if (down) l.press(k.label).catch(err => say(String(err instanceof Error ? err.message : err))); },
+      press: name => l.press(name),
       send: file => l.sendFile(file.name, file.bytes),
       reset: () => {},
-      // Picking another calculator gives the connection back to the Serial tab, which closes it.
-      stop: () => { if (serialLink === l) { serialLink = null; opts.serialDropped?.(); } },
-      async launch(name) { throw new Error(`Start it on the calculator: prgm, then ${name.toUpperCase()}.`); },
-      type: notHere("key.type"),
-      openApp: notHere("app.open"),
+      stop: () => { if (serialLink === l) { serialLink = null; void l.close(); opts.serialDropped?.(); } },
+      launch: name => l.run(name),
+      type: text => l.type(text),
+      openApp: name => l.openApp(name),
     };
   }
 
-  async function connectEvo() {
+  /** tide.json's "link": the row the connections popup starts on. */
+  let prefer: { via?: "usb" | "serial"; port?: string; model?: string } = {};
+
+  /** From a click on Connect: the connections popup, then whichever was picked. */
+  async function connectReal() {
+    const picked = await chooseConnection(prefer, text => log(text, "info"));
+    if (!picked) return;
+    if (picked.kind === "usb") return connectUsb(picked.device);
+    if (picked.kind === "evo") {
+      try { say(await describeDevice(picked.device as never, line => log(line, "info"))); } catch (err) { say(err instanceof Error ? err.message : String(err)); }
+      return;
+    }
     ui.connect.disabled = true;
+    ui.state.textContent = "connecting…";
     try {
-      say(await probeEvo(line => log(line, "info")));
+      if (engine) await stop();
+      const byteLink = await openSerialPort(picked.port);
+      // "Find out": ask the calculator which it is, as TILP's probe does.
+      let model = picked.model;
+      if (model === "auto") {
+        ui.state.textContent = "asking which calculator…";
+        const answered = await detectModel(byteLink, text => log(text, "info")).catch(async err => { await byteLink.close().catch(() => {}); throw err; });
+        if (!answered) {
+          await byteLink.close().catch(() => {});
+          throw new Error(`No calculator answered on ${byteLink.name}. Is it on, and is the cable in all the way? A TI-82 only answers with Link > Receive started; or pick the calculator in the list instead of Find out.`);
+        }
+        model = answered;
+      }
+      const l = new DbusLink(byteLink, model, text => log(text, "info"));
+      try { await l.check(); } catch (err) { await l.close().catch(() => {}); throw err; }
+      serialLink = l;
+      serialName = byteLink.name;
+      engine = serialEngine(l);
+      sentLibs.clear();
+      setCredit();
+      showLinked();
+      opts.serialConnected?.(l, byteLink.name);
+      say(model === "TI-82" ? `Ready to send to the TI-82 on ${byteLink.name}. Start Link > Receive on it before each send.` : `Connected to the ${model} on ${byteLink.name}.`);
     } catch (err) {
+      ui.state.textContent = "";
       say(err instanceof Error ? err.message : String(err));
     } finally {
       ui.connect.disabled = false;
@@ -743,7 +791,7 @@ export function createCalc(opts: {
   }
 
   function setCredit() {
-    const kind = engine?.kind ?? (choice === "usb" ? "usb" : choice === "serial" || choice === "evo" ? "serial" : choice.startsWith("rom:") ? "wabbit" : "cemu");
+    const kind = engine?.kind ?? (choice === "real" ? "usb" : choice.startsWith("rom:") ? "wabbit" : "cemu");
     const credit = $<HTMLAnchorElement>("calc-credit");
     $("calc-credit-what").textContent = isReal(kind) ? "The link" : "Emulation";
     // The serial link is TIde's own, from the TI Link Protocol Guide.
@@ -755,24 +803,10 @@ export function createCalc(opts: {
   async function start(): Promise<boolean> {
     const have = known = await files();
     fillMenu(have);
-    if (choice === "serial") {
+    if (choice === "real") {
       setCredit();
-      if (engine?.kind === "serial") { showLinked(); return true; }
-      setup("A calculator on a serial cable (TI's grey TI-Graph Link) connects in the Serial tab. Once it's connected there, Run and Send here go to it too.", "connect");
-      ui.state.textContent = "";
-      return false;
-    }
-    if (choice === "evo") {
-      setCredit();
-      setup("TIde can find a TI-84 Evo and read what it reports over USB, the first step toward sending to it. It can't send files to it yet: the Evo's link protocol isn't published.\nPlug it in with its USB-C cable and press Connect; what it reports goes to the Console.", "connect");
-      ui.state.textContent = "";
-      return false;
-    }
-    if (choice === "usb") {
-      setCredit();
-      if (engine?.kind === "usb") { showLinked(); return true; }
-      const problem = linkSupport();
-      setup(problem ?? "Plug in your calculator with its USB cable (or the SilverLink cable, for older models), turn it on, and connect.\nOn Windows, TIde needs the WinUSB driver for it: install that with Zadig (zadig.akeo.ie), as for TILP.", problem ? null : "connect");
+      if (engine && isReal(engine.kind)) { showLinked(); return true; }
+      setup("Plug in your calculator: over USB (a calculator with a USB port, or the SilverLink cable for older ones), or on a serial port with TI's grey TI-Graph Link. Turn it on, and connect: TIde lists every connection it can find.\nOn Windows, USB needs the WinUSB driver for the calculator or cable: install it with Zadig (zadig.akeo.ie), as for TILP.", "connect");
       ui.state.textContent = "";
       return false;
     }
@@ -825,7 +859,7 @@ export function createCalc(opts: {
     await stop();
     fillMenu(known);
     if (await ready()) say(`Switched to the ${engine!.model}.`);
-    else if (next === "usb" || next === "serial") say("Connect your calculator to send files to it.");
+    else if (next === "real") say("Connect your calculator to send files to it.");
   }
 
   async function addRom() {
@@ -860,7 +894,7 @@ export function createCalc(opts: {
     if (value !== choice) await choose(value);
   });
   ui.rom.addEventListener("click", () => void addRom());
-  ui.connect.addEventListener("click", () => void (choice === "serial" ? opts.openSerial?.() : choice === "evo" ? connectEvo() : connectUsb()));
+  ui.connect.addEventListener("click", () => void connectReal());
   ui.disconnect.addEventListener("click", async () => {
     await stop();
     say("Disconnected the calculator.");
@@ -916,30 +950,25 @@ export function createCalc(opts: {
       else if (sendable.length) say(`Sent ${sendable.length === 1 ? sendable[0].name : `${sendable.length} files`} to the ${engine.model}.`);
     },
     setLink(cfg) {
-      // A project that says which cable it uses switches the calculator to it, unless that's already the choice.
-      if (cfg?.via && cfg.via !== choice) void choose(cfg.via);
+      prefer = cfg ?? {};
+      // A project that names its cable switches the calculator to a real one, unless it already is.
+      if (cfg?.via && choice !== "real") void choose("real");
     },
-    async attachSerial(l, portName) {
-      if (!l) {
-        if (engine?.kind === "serial") { serialLink = null; engine = null; if (!ui.panel.hidden) void ready(); }
-        return;
-      }
-      if (engine && engine.kind !== "serial") await stop();
-      choice = "serial";
-      remember(MODEL_PREF, choice);
-      fillMenu(known);
-      serialLink = l;
-      serialName = portName;
-      engine = serialEngine(l);
-      sentLibs.clear();
-      setCredit();
-      if (!ui.panel.hidden) showLinked();
+    async connectReal() {
+      // From anywhere (the Serial tab, the File menu): the calculator becomes the real one, without
+      // leaving the tab you're on.
+      if (choice !== "real") { await stop(); choice = "real"; remember(MODEL_PREF, choice); fillMenu(known); setCredit(); }
+      await connectReal();
+    },
+    async disconnectReal() {
+      if (engine && isReal(engine.kind)) { await stop(); if (!ui.panel.hidden) void ready(); }
     },
     async macro(name, arg) {
       await view.show();
       if (!engine) throw new Error("Set up the calculator to run macros.");
       switch (name) {
         case "key.press": {
+          if (engine.press) { await engine.press(arg); break; }
           const key = engine.layout.macro.get(arg.toLowerCase());
           if (!key) throw new Error(`key.press doesn't know "${arg}". Use a key name such as enter, clear, 2nd, alpha, up or 5.`);
           await tap(key);

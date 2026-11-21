@@ -14,6 +14,9 @@ const hex = (n: number) => n.toString(16).padStart(4, "0");
 
 /** A port, as Web Serial's SerialPort. One open at a time, as the app holds one. */
 class AppSerialPort {
+  /** TIde's own: the port's name and what it is, for the connections popup. */
+  get tideName() { return this.info.description ? `${this.info.path}: ${this.info.description}` : this.info.path; }
+  get tidePath() { return this.info.path; }
   readable: ReadableStream<Uint8Array> | null = null;
   writable: WritableStream<Uint8Array> | null = null;
   private open_ = false;
@@ -65,7 +68,8 @@ class AppSerialPort {
 
 /** Gives the desktop app's page a navigator.serial. */
 export function installSerialShim() {
-  if ((navigator as { serial?: unknown }).serial) return;
+  // TIde's own, always, as with WebUSB (usb-shim.ts): a navigator.serial the web view may have can't grant a port.
+  if ((navigator as { serial?: { tideListAll?: unknown } }).serial?.tideListAll) return;
   const granted = new Map<string, AppSerialPort>();
   const portFor = (info: PortInfo) => {
     let port = granted.get(info.path);
@@ -74,6 +78,8 @@ export function installSerialShim() {
   };
   const serial = {
     async getPorts() { return [...granted.values()]; },
+    /** TIde's own, for the connections popup (connections.ts): every serial port, granted as it's listed. */
+    async tideListAll() { return (await invoke<PortInfo[]>("serial_ports")).map(portFor); },
     /** TIde's port chooser, in place of the browser's. `preselect` is TIde's own: a path to start on. */
     async requestPort(options: { filters?: Filter[]; preselect?: string } = {}) {
       const matches = (p: PortInfo) => !options.filters?.length || options.filters.some(f =>

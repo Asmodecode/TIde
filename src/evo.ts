@@ -15,7 +15,7 @@ interface UsbDevice {
 }
 
 /** USB product IDs of TI devices TILP already knows (libticables), none of them the Evo. */
-const KNOWN: Record<number, string> = {
+export const KNOWN_TI_USB: Record<number, string> = {
   0xe001: "SilverLink cable", 0xe003: "TI-84 Plus", 0xe004: "TI-89 Titanium",
   0xe008: "TI-84 Plus Silver Edition or TI-84 Plus CE", 0xe012: "TI-Nspire",
 };
@@ -32,7 +32,12 @@ export async function probeEvo(log: (text: string) => void): Promise<string> {
     if ((err as { name?: string }).name === "NotFoundError") throw new Error("No calculator was chosen. Plug in the TI-84 Evo with its USB-C cable and try again.");
     throw err;
   }
-  const known = KNOWN[device.productId];
+  return describeDevice(device, log);
+}
+
+/** Opens a TI device that isn't one TILP knows (perhaps a TI-84 Evo) and describes it in the console. */
+export async function describeDevice(device: UsbDevice, log: (text: string) => void): Promise<string> {
+  const known = KNOWN_TI_USB[device.productId];
   const lines = [
     `USB device ${hex(device.vendorId)}:${hex(device.productId)}${device.productName ? ` "${device.productName}"` : ""}${device.manufacturerName ? ` by ${device.manufacturerName}` : ""}`,
     ...(device.deviceVersionMajor !== undefined ? [`  version ${device.deviceVersionMajor}.${device.deviceVersionMinor ?? 0}`] : []),
@@ -52,6 +57,6 @@ export async function probeEvo(log: (text: string) => void): Promise<string> {
     await device.close().catch(() => {});
   }
   for (const line of lines) log(line);
-  if (known) return `That's a ${known}, not a TI-84 Evo. Choose "Real calculator (USB)" above for it.`;
+  if (known) return `That's a ${known}, not a TI-84 Evo: connect it as a USB calculator.`;
   return `TIde found ${device.productName ?? "the calculator"} (${hex(device.productId)}) and wrote what it reports over USB to the Console. Sending to the TI-84 Evo isn't possible yet: its link protocol isn't published. Until it is, send files with TI Connect Evo (connectevo.ti.com).`;
 }

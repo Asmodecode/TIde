@@ -8,7 +8,7 @@ import { installSerialShim } from "./serial-shim";
 
 export const GRAY_LINK_BAUD = 9600;
 
-interface WebSerialPort {
+export interface WebSerialPort {
   open(options: { baudRate: number; dataBits?: number; stopBits?: number; parity?: string; flowControl?: string }): Promise<void>;
   setSignals(signals: { dataTerminalReady?: boolean; requestToSend?: boolean }): Promise<void>;
   readable: ReadableStream<Uint8Array> | null;
@@ -16,9 +16,14 @@ interface WebSerialPort {
   close(): Promise<void>;
   getInfo(): { usbVendorId?: number; usbProductId?: number };
 }
-interface WebSerial { requestPort(options?: { filters?: unknown[]; preselect?: string }): Promise<WebSerialPort> }
+export interface WebSerial {
+  requestPort(options?: { filters?: unknown[]; preselect?: string }): Promise<WebSerialPort>;
+  getPorts(): Promise<WebSerialPort[]>;
+  /** The desktop app's only (serial-shim.ts): every port, not just those allowed already. */
+  tideListAll?(): Promise<WebSerialPort[]>;
+}
 
-const webSerial = () => {
+export const webSerial = () => {
   if (isTauri()) installSerialShim();
   return (navigator as unknown as { serial?: WebSerial }).serial;
 };
@@ -40,6 +45,11 @@ export async function openPort(preselect?: string, baud = GRAY_LINK_BAUD): Promi
     if ((err as { name?: string }).name === "NotFoundError") throw new Error("No serial port was chosen.");
     throw err;
   }
+  return openSerialPort(port, baud);
+}
+
+/** Opens a port already chosen (in the connections popup) for the calculator link. */
+export async function openSerialPort(port: WebSerialPort, baud = GRAY_LINK_BAUD): Promise<ByteLink> {
   await port.open({ baudRate: baud, dataBits: 8, stopBits: 1, parity: "none", flowControl: "none" });
   await port.setSignals({ dataTerminalReady: true, requestToSend: true });
   // The cable takes a moment to power up.
@@ -71,7 +81,8 @@ export async function openPort(preselect?: string, baud = GRAY_LINK_BAUD): Promi
   })();
   const info = port.getInfo();
   return {
-    name: info.usbVendorId !== undefined ? `USB serial ${info.usbVendorId.toString(16).padStart(4, "0")}:${(info.usbProductId ?? 0).toString(16).padStart(4, "0")}` : "the serial port",
+    // The desktop app knows the port's own name (COM3); a browser only its USB IDs.
+    name: (port as { tidePath?: string }).tidePath ?? (info.usbVendorId !== undefined ? `USB serial ${info.usbVendorId.toString(16).padStart(4, "0")}:${(info.usbProductId ?? 0).toString(16).padStart(4, "0")}` : "the serial port"),
     write: bytes => { started = true; return writer.write(bytes); },
     async read(max, timeoutMs) {
       if (!held.length && !closed) {
