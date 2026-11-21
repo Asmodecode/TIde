@@ -200,12 +200,15 @@ jobs:
 
   web:
     name: Web version (GitHub Pages)
-    # Each stable release also publishes TIde's web version, at https://<owner>.github.io/TIde/.
+    # Each stable release also builds TIde's web version, commits it (JavaScript and WebAssembly
+    # included) to the gh-pages branch, and publishes the same build to GitHub Pages at
+    # https://<owner>.github.io/TIde/ (Settings > Pages > Source: GitHub Actions). The branch holds
+    # only the latest build: each one replaces it, so old builds' large files don't pile up.
     if: needs.prepare.outputs.stable == 'true'
     needs: prepare
     runs-on: ubuntu-latest
     permissions:
-      contents: read
+      contents: write
       pages: write
       id-token: write
     environment:
@@ -227,6 +230,25 @@ jobs:
           mkdir -p toolchain/clang/dist
           gh release download web-toolchain --repo "${{ github.repository }}" --pattern "clang.*" --dir toolchain/clang/dist             || echo "::warning::No web-toolchain release yet, so the web version can't compile C. Run the Web toolchain workflow."
       - run: npm run build:web
+      - name: Commit the built site to gh-pages
+        env:
+          VERSION: ${{ needs.prepare.outputs.version }}
+        run: |
+          cd dist-web
+          # GitHub refuses files over 100 MB; one that big is left out, with a warning, rather than failing the push.
+          while IFS= read -r big; do
+            echo "::warning::Left $big out of gh-pages: GitHub doesn't take files over 100 MB."
+            rm -f "$big"
+          done < <(find . -type f -size +95M)
+          # Served as files, not through Jekyll (which would drop anything starting with "_").
+          touch .nojekyll
+          git init -q -b gh-pages
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -q -m "TIde $VERSION web version, built from ${GITHUB_SHA::7}"
+          git push --force "https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}.git" gh-pages
+          rm -rf .git
       - uses: actions/upload-pages-artifact@v3
         with:
           path: dist-web
