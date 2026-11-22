@@ -18,15 +18,55 @@ import { appVersion, checkForUpdate } from "./updater";
 import { createScm } from "./scm";
 import { showMenu, type MenuItem } from "./menu";
 import { SEND_TYPES, TREE_DRAG, createCalc, unbundle } from "./calc";
-import { ENCODINGS, canSave, decodeWith, detect, encode, encodingByKey, encodingKey, type Encoding } from "./encoding";
+import {
+  ENCODINGS,
+  canSave,
+  decodeWith,
+  detect,
+  encode,
+  encodingByKey,
+  encodingKey,
+  type Encoding,
+} from "./encoding";
 import { hexDump, parseTiFile } from "./tifile";
-import { onSettingsChange, projectSettings, resetSettings, setProjectSettings, setSetting, settings, settingsPage, type Row } from "./settings";
-import { CONFIG_DIR, CONFIG_FILE, CONFIG_SCHEMA, CONFIG_TEMPLATE, parseMacro, readConfig, splitCommand, splitPattern, steps, type ProjectConfig } from "./config";
+import {
+  onSettingsChange,
+  projectSettings,
+  resetSettings,
+  setProjectSettings,
+  setSetting,
+  settings,
+  settingsPage,
+  type Row,
+} from "./settings";
+import {
+  CONFIG_DIR,
+  CONFIG_FILE,
+  CONFIG_SCHEMA,
+  CONFIG_TEMPLATE,
+  parseMacro,
+  readConfig,
+  splitCommand,
+  splitPattern,
+  steps,
+  type ProjectConfig,
+} from "./config";
 import { DOCS, createDocs, type DocLangId } from "./docs";
 import { watchModel } from "./intellisense";
 import { make8xp, tokenize } from "./build";
 import { exportProgram } from "./export";
-import { EXTENSION_SCHEMA, EXTENSION_TYPES, emit, extensionCommands, extensionsFolder, loadExtensions, reloadExtensions, type BundledExtension, type ExtensionHost, type ExtensionManifest } from "./extensions";
+import {
+  EXTENSION_SCHEMA,
+  EXTENSION_TYPES,
+  emit,
+  extensionCommands,
+  extensionsFolder,
+  loadExtensions,
+  reloadExtensions,
+  type BundledExtension,
+  type ExtensionHost,
+  type ExtensionManifest,
+} from "./extensions";
 import { createExtensionsView } from "./extensions-view";
 import { createPanel } from "./panel";
 import { assemble, programName } from "./spasm";
@@ -35,29 +75,50 @@ import { fs, normalizeName, store, type Entry } from "./store";
 
 (self as unknown as { MonacoEnvironment: object }).MonacoEnvironment = {
   getWorker: (_: unknown, label: string) =>
-    label === "json" ? new jsonWorker() : label === "typescript" || label === "javascript" ? new tsWorker() : new editorWorker(),
+    label === "json"
+      ? new jsonWorker()
+      : label === "typescript" || label === "javascript"
+        ? new tsWorker()
+        : new editorWorker(),
 };
 // tide.json gets completions, hover help and checking from its schema. Comments are allowed in it.
 monacoJson.jsonDefaults.setDiagnosticsOptions({
-  validate: true, allowComments: true, trailingCommas: "ignore",
+  validate: true,
+  allowComments: true,
+  trailingCommas: "ignore",
   schemas: [
-    { uri: "tide://schema/tide.json", fileMatch: [`**/${CONFIG_DIR}/${CONFIG_FILE}`], schema: CONFIG_SCHEMA },
-    { uri: "tide://schema/extension.json", fileMatch: ["**/extensions/*/extension.json"], schema: EXTENSION_SCHEMA },
+    {
+      uri: "tide://schema/tide.json",
+      fileMatch: [`**/${CONFIG_DIR}/${CONFIG_FILE}`],
+      schema: CONFIG_SCHEMA,
+    },
+    {
+      uri: "tide://schema/extension.json",
+      fileMatch: ["**/extensions/*/extension.json"],
+      schema: EXTENSION_SCHEMA,
+    },
   ],
 });
 // An extension's main.js gets completions and checking for the tide API it's given.
-monacoTs.javascriptDefaults.addExtraLib(EXTENSION_TYPES, "file:///tide/extension-api.d.ts");
+monacoTs.javascriptDefaults.addExtraLib(
+  EXTENSION_TYPES,
+  "file:///tide/extension-api.d.ts",
+);
 monacoTs.javascriptDefaults.setCompilerOptions({
-  target: monacoTs.ScriptTarget.ESNext, module: monacoTs.ModuleKind.ESNext, allowNonTsExtensions: true, allowJs: true, lib: ["esnext", "dom"],
+  target: monacoTs.ScriptTarget.ESNext,
+  module: monacoTs.ModuleKind.ESNext,
+  allowNonTsExtensions: true,
+  allowJs: true,
+  lib: ["esnext", "dom"],
 });
 
 const screenCols = () => TARGETS[getTarget()].cols;
 
 /** One open editor tab: either a TI-BASIC program from the store or a file from the open project folder. */
 interface Doc {
-  id: string;        // "prgm:NAME" or "file:/absolute/path"
-  label: string;     // tab title
-  hint?: string;     // tab tooltip (full path for project files)
+  id: string; // "prgm:NAME" or "file:/absolute/path"
+  label: string; // tab title
+  hint?: string; // tab tooltip (full path for project files)
   language: string;
   model: monaco.editor.ITextModel;
   savedVersion: number;
@@ -71,9 +132,15 @@ interface Doc {
 }
 
 /** A tab that isn't a text editor: Settings, a TI file's metadata, or a file TIde can't show as text. */
-interface View { id: string; label: string; hint?: string; el: HTMLElement }
+interface View {
+  id: string;
+  label: string;
+  hint?: string;
+  el: HTMLElement;
+}
 
-const $ = <T extends HTMLElement>(id: string) => document.getElementById(id) as T;
+const $ = <T extends HTMLElement>(id: string) =>
+  document.getElementById(id) as T;
 const els = {
   find: $<HTMLInputElement>("find"),
   list: $("list"),
@@ -102,7 +169,9 @@ const els = {
 };
 
 function h<K extends keyof HTMLElementTagNameMap>(
-  tag: K, props: Partial<HTMLElementTagNameMap[K]> & { role?: string } = {}, ...kids: (Node | string)[]
+  tag: K,
+  props: Partial<HTMLElementTagNameMap[K]> & { role?: string } = {},
+  ...kids: (Node | string)[]
 ): HTMLElementTagNameMap[K] {
   const node = Object.assign(document.createElement(tag), props);
   if (props.role) node.setAttribute("role", props.role);
@@ -125,13 +194,15 @@ const SERIAL_TAB = "view:serial";
 // The calculator's console lines also go to the Console tab under the editor. The calculator starts
 // before that panel exists, so its first lines wait here.
 const consoleBacklog: [string, "out" | "err" | "info" | "emu"][] = [];
-let toConsole = (text: string, kind: "out" | "err" | "info" | "emu") => { consoleBacklog.push([text, kind]); };
+let toConsole = (text: string, kind: "out" | "err" | "info" | "emu") => {
+  consoleBacklog.push([text, kind]);
+};
 const calc = createCalc({
   onLog: (text, kind) => toConsole(text, kind),
-  say: text => setMessage(text),
-  pickRom: () => fs.pickFile("TI-84 Plus CE ROM", ["rom"]),
+  say: (text) => setMessage(text),
+  pickRom: (label, extensions) => fs.pickFile(label, extensions),
   pickFiles: () => fs.pickFiles("TI files", SEND_TYPES),
-  readFile: path => fs.readBinary(path),
+  readFile: (path) => fs.readBinary(path),
   serialConnected: (link, portName) => serialView.adopt(link, portName),
   serialDropped: () => serialView.dropped(),
   layout: () => {
@@ -140,7 +211,12 @@ const calc = createCalc({
     $("act-calc").setAttribute("aria-pressed", String(calc.visible));
     if (calc.visible) {
       if (active !== CALC_TAB) {
-        views.set(CALC_TAB, { id: CALC_TAB, label: "Calculator", hint: "The TI-84 Plus CE emulator", el: h("div") });
+        views.set(CALC_TAB, {
+          id: CALC_TAB,
+          label: "Calculator",
+          hint: "The TI-84 Plus CE emulator",
+          el: h("div"),
+        });
         if (!tabOrder.includes(CALC_TAB)) tabOrder.push(CALC_TAB);
         active = CALC_TAB;
         showActive();
@@ -152,30 +228,41 @@ const calc = createCalc({
 
 // The Serial tab: a calculator on a serial cable. While it's connected, the calculator panel uses it too.
 const serialView = createSerialView({
-  say: text => setMessage(text),
+  say: (text) => setMessage(text),
   log: (text, err) => toConsole(text, err ? "err" : "info"),
   connect: () => calc.connectReal(),
   disconnect: () => calc.disconnectReal(),
   pickFiles: () => fs.pickFiles("TI files", SEND_TYPES),
-  readFile: path => fs.readBinary(path),
+  readFile: (path) => fs.readBinary(path),
 });
 function openSerialTab() {
-  openView({ id: SERIAL_TAB, label: "Serial", hint: "A calculator on a serial cable (TI-Graph Link)", el: serialView.el });
+  openView({
+    id: SERIAL_TAB,
+    label: "Serial",
+    hint: "A calculator on a serial cable (TI-Graph Link)",
+    el: serialView.el,
+  });
 }
 
 const scm = createScm({
   root: () => project?.root ?? null,
   open: (path, name) => void openFile({ name, path, isDir: false }),
-  say: text => setMessage(text),
-  changed: status => {
+  say: (text) => setMessage(text),
+  changed: (status) => {
     // Changed-file count on the activity bar, and the branch in the status bar.
-    const badge = $("scm-badge"), branch = $<HTMLButtonElement>("status-branch");
+    const badge = $("scm-badge"),
+      branch = $<HTMLButtonElement>("status-branch");
     const count = status?.files.length ?? 0;
     badge.hidden = !count;
     badge.textContent = count > 99 ? "99+" : String(count);
     branch.hidden = !status?.branch;
     if (status) {
-      const sync = [status.ahead && `↑${status.ahead}`, status.behind && `↓${status.behind}`].filter(Boolean).join(" ");
+      const sync = [
+        status.ahead && `↑${status.ahead}`,
+        status.behind && `↓${status.behind}`,
+      ]
+        .filter(Boolean)
+        .join(" ");
       branch.textContent = `⎇ ${status.branch}${sync ? ` ${sync}` : ""}`;
       branch.title = `${status.branch}${status.upstream ? "" : " (not pushed yet)"} · Source Control`;
     }
@@ -193,9 +280,16 @@ const GUTTER_PREF = "tide-pref-numbers"; // must not start with "tide:" or the b
 const PROJECT_PREF = "tide-pref-project"; // same rule
 const BUILD_PREF = "tide-pref-builds"; // same rule
 let showNumbers = false;
-try { showNumbers = localStorage.getItem(GUTTER_PREF) === "1"; } catch { /* storage unavailable */ }
+try {
+  showNumbers = localStorage.getItem(GUTTER_PREF) === "1";
+} catch {
+  /* storage unavailable */
+}
 
-function gutterOptions(): Pick<monaco.editor.IEditorOptions, "lineNumbers" | "lineNumbersMinChars"> {
+function gutterOptions(): Pick<
+  monaco.editor.IEditorOptions,
+  "lineNumbers" | "lineNumbersMinChars"
+> {
   return showNumbers
     ? { lineNumbers: "on", lineNumbersMinChars: 3 }
     : { lineNumbers: () => ":", lineNumbersMinChars: 1 };
@@ -254,16 +348,26 @@ const expanded = new Set<string>();
 
 const progId = (name: string) => `prgm:${name}`;
 const fileId = (path: string) => `file:${path}`;
-const baseName = (path: string) => path.split(/[\\/]/).filter(Boolean).pop() ?? path;
-const isDirty = (d: Doc) => d.model.getAlternativeVersionId() !== d.savedVersion;
+const baseName = (path: string) =>
+  path.split(/[\\/]/).filter(Boolean).pop() ?? path;
+const isDirty = (d: Doc) =>
+  d.model.getAlternativeVersionId() !== d.savedVersion;
 const activeDoc = () => (active ? docs.get(active) : undefined);
 const mod = (e: KeyboardEvent) => e.ctrlKey || e.metaKey;
 /** In a folder with a Makefile, everything except a TI-BASIC program builds with make. */
-const usesMake = () => !!project && (project.hasMakefile || !!config.build) && activeDoc()?.language !== "tibasic";
+const usesMake = () =>
+  !!project &&
+  (project.hasMakefile || !!config.build) &&
+  activeDoc()?.language !== "tibasic";
 /** The open file is assembly that spasm-ng builds: z80 (TI-83 Plus / 84 Plus), or eZ80 outside a make project. */
 const assemblesActive = () => {
   const doc = activeDoc();
-  return !!doc && !!project && doc.id.startsWith("file:") && (doc.language === "z80" || (doc.language === ASM_LANG && !usesMake()));
+  return (
+    !!doc &&
+    !!project &&
+    doc.id.startsWith("file:") &&
+    (doc.language === "z80" || (doc.language === ASM_LANG && !usesMake()))
+  );
 };
 
 /** The project's files, by path relative to its root with "/", for the assembler. Leaves out hidden and build folders. */
@@ -272,10 +376,17 @@ async function projectFiles(dir = ""): Promise<Map<string, Uint8Array>> {
   const out = new Map<string, Uint8Array>();
   const walk = async (dir: string, rel: string) => {
     for (const e of await fs.readDir(dir)) {
-      if (e.name.startsWith(".") || (e.isDir && ["node_modules", "bin", "obj", "target"].includes(e.name))) continue;
+      if (
+        e.name.startsWith(".") ||
+        (e.isDir && ["node_modules", "bin", "obj", "target"].includes(e.name))
+      )
+        continue;
       if (out.size > 2000) return;
       if (e.isDir) await walk(e.path, `${rel}${e.name}/`);
-      else if (!/\.(8x[a-z]|8e[a-z]|b8[34]|rom|zip|exe|png|jpe?g|gif)$/i.test(e.name)) out.set(`${rel}${e.name}`, await fs.readBinary(e.path));
+      else if (
+        !/\.(8x[a-z]|8e[a-z]|b8[34]|rom|zip|exe|png|jpe?g|gif)$/i.test(e.name)
+      )
+        out.set(`${rel}${e.name}`, await fs.readBinary(e.path));
     }
   };
   await walk(dir ? joinPath(project!.root, dir) : project!.root, "");
@@ -283,28 +394,43 @@ async function projectFiles(dir = ""): Promise<Map<string, Uint8Array>> {
 }
 
 /** Assembles the open file with spasm-ng: its log in Output, and the program on success. */
-async function assembleActive(): Promise<{ name: string; bytes: Uint8Array; path: string } | null> {
+async function assembleActive(): Promise<{
+  name: string;
+  bytes: Uint8Array;
+  path: string;
+} | null> {
   const doc = activeDoc()!;
   if (isDirty(doc)) await saveDoc(doc);
   const path = doc.id.slice(5);
-  const rel = path.slice(project!.root.length).replace(/^[\\/]+/, "").replace(/\\/g, "/");
+  const rel = path
+    .slice(project!.root.length)
+    .replace(/^[\\/]+/, "")
+    .replace(/\\/g, "/");
   const name = programName(baseName(path));
   const ez80 = doc.language === ASM_LANG;
   setMessage(`Assembling ${doc.label}…`);
-  const run = panel.outputRun("Assemble", `spasm${ez80 ? " -E" : ""} ${rel} → ${name}.8xp`, () => {});
+  const run = panel.outputRun(
+    "Assemble",
+    `spasm${ez80 ? " -E" : ""} ${rel} → ${name}.8xp`,
+    () => {},
+  );
   try {
     const result = await assemble(await projectFiles(), rel, name, ez80);
     if (result.log.trim()) run.write(`${result.log.trim()}\n`, !result.ok);
     run.end(result.ok, result.ok ? 0 : 1);
     if (!result.ok || !result.bytes) {
       panel.show("output");
-      const first = result.log.split("\n").find(l => /error/i.test(l));
-      setMessage(`${doc.label} didn't assemble${first ? `: ${first.trim()}` : ""} (full log in Output)`);
+      const first = result.log.split("\n").find((l) => /error/i.test(l));
+      setMessage(
+        `${doc.label} didn't assemble${first ? `: ${first.trim()}` : ""} (full log in Output)`,
+      );
       return null;
     }
     const out = joinPath(parentOf(path), `${name}.8xp`);
     await fs.writeBinary(out, result.bytes);
-    setMessage(`Assembled ${doc.label} into ${name}.8xp (${result.bytes.length} bytes)`);
+    setMessage(
+      `Assembled ${doc.label} into ${name}.8xp (${result.bytes.length} bytes)`,
+    );
     return { name, bytes: result.bytes, path: out };
   } catch (err) {
     run.write(`${err}\n`, true);
@@ -315,21 +441,52 @@ async function assembleActive(): Promise<{ name: string; bytes: Uint8Array; path
 }
 const joinPath = (root: string, rel: string) => {
   const sep = root.includes("\\") ? "\\" : "/";
-  return [root.replace(/[\\/]+$/, ""), ...rel.split(/[\\/]/).filter(Boolean)].join(sep);
+  return [
+    root.replace(/[\\/]+$/, ""),
+    ...rel.split(/[\\/]/).filter(Boolean),
+  ].join(sep);
 };
-const configPath = () => (project ? joinPath(project.root, `${CONFIG_DIR}/${CONFIG_FILE}`) : null);
+const configPath = () =>
+  project ? joinPath(project.root, `${CONFIG_DIR}/${CONFIG_FILE}`) : null;
 const isBasic = () => (activeDoc()?.language ?? "tibasic") === "tibasic";
+/** The folder a path is in, for running Luna beside the script it packs. */
+const dirName = (path: string) => {
+  const i = Math.max(path.lastIndexOf("/"), path.lastIndexOf("\\"));
+  return i < 0 ? "." : path.slice(0, i);
+};
+/** A script Run packs into a .tns with Luna: any .lua file, or a .py file outside a make project. */
+const nspireScript = (d = activeDoc()) =>
+  !!d && (d.language === "lua" || d.language === "python");
+/** The Build button's label for what the active file builds into. */
+const buildLabel = () =>
+  usesMake() ? "Build" : nspireScript() ? "Pack .tns" : "Build .8xp";
 
 // ── Actions ────────────────────────────────────────────────────────────────
 
-function addDoc(init: Pick<Doc, "id" | "label" | "hint" | "language" | "write"> & { source: string }): Doc {
-  const model = monaco.editor.createModel(init.source, init.language, init.hint ? monaco.Uri.file(init.hint) : undefined);
+function addDoc(
+  init: Pick<Doc, "id" | "label" | "hint" | "language" | "write"> & {
+    source: string;
+  },
+): Doc {
+  const model = monaco.editor.createModel(
+    init.source,
+    init.language,
+    init.hint ? monaco.Uri.file(init.hint) : undefined,
+  );
   const doc: Doc = {
-    id: init.id, label: init.label, hint: init.hint, language: init.language,
-    model, savedVersion: model.getAlternativeVersionId(), write: init.write,
+    id: init.id,
+    label: init.label,
+    hint: init.hint,
+    language: init.language,
+    model,
+    savedVersion: model.getAlternativeVersionId(),
+    write: init.write,
   };
   docs.set(doc.id, doc);
-  model.onDidChangeContent(() => { refresh(); autoSaveSoon(doc); });
+  model.onDidChangeContent(() => {
+    refresh();
+    autoSaveSoon(doc);
+  });
   // Each file keeps the indentation it has: tabs or spaces, in its own steps (indent.ts).
   applyIndentation(model, doc.label, doc.language, settings().tabSize);
   if (doc.language === "tibasic") watchModel(model);
@@ -338,7 +495,8 @@ function addDoc(init: Pick<Doc, "id" | "label" | "hint" | "language" | "write"> 
 }
 
 function activate(id: string, note?: string) {
-  const doc = docs.get(id), view = views.get(id);
+  const doc = docs.get(id),
+    view = views.get(id);
   if (!doc && !view) return;
   if (!tabOrder.includes(id)) tabOrder.push(id);
   active = id;
@@ -349,15 +507,21 @@ function activate(id: string, note?: string) {
   if (doc) editor.focus();
   setMessage(note ?? `Opened ${(doc ?? view)!.label}`);
   refresh();
-  if (doc) emit("open", { name: doc.label, path: doc.id.startsWith("file:") ? doc.id.slice(5) : null, language: doc.language });
+  if (doc)
+    emit("open", {
+      name: doc.label,
+      path: doc.id.startsWith("file:") ? doc.id.slice(5) : null,
+      language: doc.language,
+    });
 }
 
 /** Shows the active tab: its model in the editor, or its view over the editor. */
 function showActive() {
   const view = active && active !== CALC_TAB ? views.get(active) : undefined;
-  editor.setModel(active ? docs.get(active)?.model ?? null : null);
+  editor.setModel(active ? (docs.get(active)?.model ?? null) : null);
   els.viewHost.hidden = !view;
-  if (view && els.viewHost.firstElementChild !== view.el) els.viewHost.replaceChildren(view.el);
+  if (view && els.viewHost.firstElementChild !== view.el)
+    els.viewHost.replaceChildren(view.el);
   applyEditorMode();
 }
 
@@ -372,12 +536,20 @@ async function openProgram(name: string, note?: string) {
   const id = progId(name);
   if (!docs.has(id)) {
     const source = await store.load(name);
-    if (!docs.has(id)) addDoc({ id, label: name, language: "tibasic", source, write: s => store.save(name, s) });
+    if (!docs.has(id))
+      addDoc({
+        id,
+        label: name,
+        language: "tibasic",
+        source,
+        write: (s) => store.save(name, s),
+      });
   }
   activate(id, note);
 }
 
-const extOf = (name: string) => name.slice(name.lastIndexOf(".") + 1).toLowerCase();
+const extOf = (name: string) =>
+  name.slice(name.lastIndexOf(".") + 1).toLowerCase();
 
 async function openFile(entry: Entry) {
   const id = fileId(entry.path);
@@ -390,12 +562,14 @@ async function openFile(entry: Entry) {
     return;
   }
   if (docs.has(id) || views.has(id)) return activate(id);
-  if (SEND_TYPES.includes(extOf(entry.name))) return openView(await tiFileView(entry, bytes));
+  if (SEND_TYPES.includes(extOf(entry.name)))
+    return openView(await tiFileView(entry, bytes));
   const fallback = encodingByKey(settings().fallbackEncoding) ?? ENCODINGS[4];
   const found = detect(bytes, fallback);
   if (!found) return openView(unsupportedView(entry, bytes));
   openText(entry, found.text, found.encoding);
-  if (found.encoding !== ENCODINGS[0]) setMessage(`Opened ${entry.name} as ${found.encoding.label}`);
+  if (found.encoding !== ENCODINGS[0])
+    setMessage(`Opened ${entry.name} as ${found.encoding.label}`);
 }
 
 /** Opens a project file as text in an encoding, saving it back in the same encoding. */
@@ -403,12 +577,19 @@ function openText(entry: Entry, text: string, encoding: Encoding) {
   const id = fileId(entry.path);
   let path = entry.path;
   const doc = addDoc({
-    id, label: entry.name, hint: entry.path, language: languageFor(entry.name), source: text,
+    id,
+    label: entry.name,
+    hint: entry.path,
+    language: languageFor(entry.name),
+    source: text,
     async write(s) {
       // A file dropped from outside has nowhere to go back to: the first save asks where.
       if (path.startsWith(DROPPED)) {
         const ext = entry.name.includes(".") ? extOf(entry.name) : "";
-        const to = await fs.pickSaveFile(entry.name, { name: ext ? `.${ext} file` : "File", extensions: ext ? [ext] : ["*"] });
+        const to = await fs.pickSaveFile(entry.name, {
+          name: ext ? `.${ext} file` : "File",
+          extensions: ext ? [ext] : ["*"],
+        });
         if (!to) throw new Error("no place was chosen");
         path = to;
         docs.get(id)!.hint = to;
@@ -425,7 +606,13 @@ function openText(entry: Entry, text: string, encoding: Encoding) {
 async function reopenWith(encoding: Encoding) {
   const doc = activeDoc();
   if (!doc?.encoding || !doc.hint) return;
-  if (isDirty(doc) && !confirm(`Reopening ${doc.label} as ${encoding.label} discards your unsaved changes. Continue?`)) return renderStatus();
+  if (
+    isDirty(doc) &&
+    !confirm(
+      `Reopening ${doc.label} as ${encoding.label} discards your unsaved changes. Continue?`,
+    )
+  )
+    return renderStatus();
   const bytes = await fs.readBinary(doc.hint);
   doc.model.setValue(decodeWith(bytes, encoding));
   doc.savedVersion = doc.model.getAlternativeVersionId();
@@ -438,7 +625,10 @@ async function reopenWith(encoding: Encoding) {
 async function saveWith(encoding: Encoding) {
   const doc = activeDoc();
   if (!doc?.encoding) return;
-  if (!canSave(encoding)) { setMessage(`TIde can open ${encoding.label} but not save it.`); return renderStatus(); }
+  if (!canSave(encoding)) {
+    setMessage(`TIde can open ${encoding.label} but not save it.`);
+    return renderStatus();
+  }
   const before = doc.encoding;
   doc.encoding = encoding;
   if (!(await saveDoc(doc))) doc.encoding = before;
@@ -448,68 +638,211 @@ async function saveWith(encoding: Encoding) {
 
 /** A tab for a file that is binary or not text in any encoding TIde recognises. */
 function unsupportedView(entry: Entry, bytes: Uint8Array): View {
-  const select = h("select", {}, ...ENCODINGS.map(e => h("option", { value: encodingKey(e) }, e.label)));
-  const open = h("button", { type: "button", className: "primary", onclick: () => {
-    const encoding = encodingByKey(select.value) ?? ENCODINGS[0];
-    closeTab(fileId(entry.path));
-    openText(entry, decodeWith(bytes, encoding), encoding);
-  } }, "Open as text");
+  const select = h(
+    "select",
+    {},
+    ...ENCODINGS.map((e) => h("option", { value: encodingKey(e) }, e.label)),
+  );
+  const open = h(
+    "button",
+    {
+      type: "button",
+      className: "primary",
+      onclick: () => {
+        const encoding = encodingByKey(select.value) ?? ENCODINGS[0];
+        closeTab(fileId(entry.path));
+        openText(entry, decodeWith(bytes, encoding), encoding);
+      },
+    },
+    "Open as text",
+  );
   return {
-    id: fileId(entry.path), label: entry.name, hint: entry.path,
-    el: h("div", { className: "file-view" },
+    id: fileId(entry.path),
+    label: entry.name,
+    hint: entry.path,
+    el: h(
+      "div",
+      { className: "file-view" },
       h("h1", {}, entry.name),
-      h("p", { className: "notice" }, "This file isn't shown because it is binary or uses an unsupported text encoding."),
-      h("p", { className: "hint" }, `${bytes.length.toLocaleString()} bytes. Opening it as text and saving can damage a binary file.`),
+      h(
+        "p",
+        { className: "notice" },
+        "This file isn't shown because it is binary or uses an unsupported text encoding.",
+      ),
+      h(
+        "p",
+        { className: "hint" },
+        `${bytes.length.toLocaleString()} bytes. Opening it as text and saving can damage a binary file.`,
+      ),
       h("div", { className: "row" }, h("label", {}, "Encoding ", select), open),
       h("h2", {}, "First bytes"),
-      h("pre", { className: "hex" }, hexDump(bytes))),
+      h("pre", { className: "hex" }, hexDump(bytes)),
+    ),
   };
 }
 
 /** A tab with a TI file's metadata: its variables, or the Flash app/OS header, or a bundle's contents. */
 async function tiFileView(entry: Entry, bytes: Uint8Array): Promise<View> {
-  const view: View = { id: fileId(entry.path), label: entry.name, hint: entry.path, el: h("div", { className: "file-view ti-file" }) };
-  const send = h("button", { type: "button", className: "primary", onclick: () => void calc.send([{ name: entry.name, bytes }]) }, "Send to calculator");
-  const facts = (pairs: [string, string][]) => h("dl", { className: "facts" }, ...pairs.flatMap(([k, v]) => [h("dt", {}, k), h("dd", {}, v)]));
-  const parts: HTMLElement[] = [h("div", { className: "title-row" }, h("h1", {}, entry.name), send)];
+  const view: View = {
+    id: fileId(entry.path),
+    label: entry.name,
+    hint: entry.path,
+    el: h("div", { className: "file-view ti-file" }),
+  };
+  const send = h(
+    "button",
+    {
+      type: "button",
+      className: "primary",
+      onclick: () => void calc.send([{ name: entry.name, bytes }]),
+    },
+    "Send to calculator",
+  );
+  const facts = (pairs: [string, string][]) =>
+    h(
+      "dl",
+      { className: "facts" },
+      ...pairs.flatMap(([k, v]) => [h("dt", {}, k), h("dd", {}, v)]),
+    );
+  const parts: HTMLElement[] = [
+    h("div", { className: "title-row" }, h("h1", {}, entry.name), send),
+  ];
   try {
     if (/^b8[34]$/.test(extOf(entry.name))) {
       const inside = await unbundle({ name: entry.name, bytes });
-      parts.push(facts([["Kind", "Bundle"], ["Size", `${bytes.length.toLocaleString()} bytes`], ["Files", String(inside.length)]]),
+      parts.push(
+        facts([
+          ["Kind", "Bundle"],
+          ["Size", `${bytes.length.toLocaleString()} bytes`],
+          ["Files", String(inside.length)],
+        ]),
         h("h2", {}, "Contents"),
-        h("table", {}, h("tr", {}, h("th", {}, "File"), h("th", {}, "Size")),
-          ...inside.map(f => h("tr", {}, h("td", {}, f.name), h("td", {}, `${f.bytes.length.toLocaleString()} bytes`)))));
+        h(
+          "table",
+          {},
+          h("tr", {}, h("th", {}, "File"), h("th", {}, "Size")),
+          ...inside.map((f) =>
+            h(
+              "tr",
+              {},
+              h("td", {}, f.name),
+              h("td", {}, `${f.bytes.length.toLocaleString()} bytes`),
+            ),
+          ),
+        ),
+      );
     } else {
       const info = parseTiFile(bytes);
       if (info.kind === "flash") {
-        parts.push(facts([["Kind", info.type], ["Name", info.name], ["Version", info.version], ["For", info.device],
-          ["Date", info.date], ["Data", `${info.size.toLocaleString()} bytes`], ["Signature", info.signature]]));
+        parts.push(
+          facts([
+            ["Kind", info.type],
+            ["Name", info.name],
+            ["Version", info.version],
+            ["For", info.device],
+            ["Date", info.date],
+            ["Data", `${info.size.toLocaleString()} bytes`],
+            ["Signature", info.signature],
+          ]),
+        );
       } else {
-        parts.push(facts([["Comment", info.comment || "(none)"], ["Variables", String(info.vars.length)],
-          ["Size", `${bytes.length.toLocaleString()} bytes`], ["Checksum", info.checksumOk ? "Valid" : "Doesn't match: the file may be damaged"],
-          ["Signature", info.signature]]));
-        parts.push(h("h2", {}, "Variables"),
-          h("table", {}, h("tr", {}, ...["Name", "Type", "Size", "Archived", "Version"].map(t => h("th", {}, t))),
-            ...info.vars.map(v => h("tr", {}, h("td", { className: "mono" }, v.name), h("td", {}, v.typeName),
-              h("td", {}, `${v.size.toLocaleString()} bytes`), h("td", {}, v.archived === null ? "—" : v.archived ? "Yes" : "No"),
-              h("td", {}, v.version === null ? "—" : String(v.version))))));
+        parts.push(
+          facts([
+            ["Comment", info.comment || "(none)"],
+            ["Variables", String(info.vars.length)],
+            ["Size", `${bytes.length.toLocaleString()} bytes`],
+            [
+              "Checksum",
+              info.checksumOk
+                ? "Valid"
+                : "Doesn't match: the file may be damaged",
+            ],
+            ["Signature", info.signature],
+          ]),
+        );
+        parts.push(
+          h("h2", {}, "Variables"),
+          h(
+            "table",
+            {},
+            h(
+              "tr",
+              {},
+              ...["Name", "Type", "Size", "Archived", "Version"].map((t) =>
+                h("th", {}, t),
+              ),
+            ),
+            ...info.vars.map((v) =>
+              h(
+                "tr",
+                {},
+                h("td", { className: "mono" }, v.name),
+                h("td", {}, v.typeName),
+                h("td", {}, `${v.size.toLocaleString()} bytes`),
+                h(
+                  "td",
+                  {},
+                  v.archived === null ? "—" : v.archived ? "Yes" : "No",
+                ),
+                h("td", {}, v.version === null ? "—" : String(v.version)),
+              ),
+            ),
+          ),
+        );
         for (const v of info.vars) {
           if (v.source !== null) {
             const name = normalizeName(v.name);
-            parts.push(h("div", { className: "title-row" }, h("h2", {}, `prgm${v.name}`),
-              ...(name ? [h("button", { type: "button", onclick: () => void importProgram(name, v.source!) }, "Open as program")] : [])),
-              h("pre", { className: "source" }, v.source || "(empty)"));
+            parts.push(
+              h(
+                "div",
+                { className: "title-row" },
+                h("h2", {}, `prgm${v.name}`),
+                ...(name
+                  ? [
+                      h(
+                        "button",
+                        {
+                          type: "button",
+                          onclick: () => void importProgram(name, v.source!),
+                        },
+                        "Open as program",
+                      ),
+                    ]
+                  : []),
+              ),
+              h("pre", { className: "source" }, v.source || "(empty)"),
+            );
           } else if (v.native) {
-            parts.push(h("h2", {}, `prgm${v.name}`),
-              h("p", { className: "hint" }, "A native program (C or assembly). Send it to the calculator to run it; TI blocks native programs on OS 5.5 and later."));
+            parts.push(
+              h("h2", {}, `prgm${v.name}`),
+              h(
+                "p",
+                { className: "hint" },
+                "A native program (C or assembly). Send it to the calculator to run it; TI blocks native programs on OS 5.5 and later.",
+              ),
+            );
           } else if (v.data.length) {
-            parts.push(h("details", {}, h("summary", {}, `${v.name} data`), h("pre", { className: "hex" }, hexDump(v.data))));
+            parts.push(
+              h(
+                "details",
+                {},
+                h("summary", {}, `${v.name} data`),
+                h("pre", { className: "hex" }, hexDump(v.data)),
+              ),
+            );
           }
         }
       }
     }
   } catch (err) {
-    parts.push(h("p", { className: "notice" }, `TIde couldn't read this file: ${err instanceof Error ? err.message : err}`), h("pre", { className: "hex" }, hexDump(bytes)));
+    parts.push(
+      h(
+        "p",
+        { className: "notice" },
+        `TIde couldn't read this file: ${err instanceof Error ? err.message : err}`,
+      ),
+      h("pre", { className: "hex" }, hexDump(bytes)),
+    );
   }
   view.el.replaceChildren(...parts);
   return view;
@@ -526,24 +859,55 @@ const panel = createPanel({
 toConsole = (text, kind) => panel.console(text, kind);
 $("calc-console-toggle").addEventListener("click", () => panel.show("console"));
 for (const [text, kind] of consoleBacklog.splice(0)) panel.console(text, kind);
-/** Writes a line of TIde's own to Output. */
-function output(text: string, kind: "cmd" | "ok" | "err" | "" = "") { panel.output(text, kind); }
-const openOutput = () => panel.show("output");
+// ── Output tab: build and script output ──
+const outputLog = h("pre", { className: "output-log" });
+const outputView: View = {
+  id: "output",
+  label: "Output",
+  el: h(
+    "div",
+    { className: "output-view" },
+    h(
+      "div",
+      { className: "title-row" },
+      h("h1", {}, "Output"),
+      h(
+        "button",
+        { type: "button", onclick: () => outputLog.replaceChildren() },
+        "Clear",
+      ),
+    ),
+    outputLog,
+  ),
+};
+function output(text: string, kind: "cmd" | "ok" | "err" | "" = "") {
+  const atEnd =
+    outputLog.scrollTop + outputLog.clientHeight >= outputLog.scrollHeight - 4;
+  outputLog.append(
+    h("span", { className: kind }, text.endsWith("\n") ? text : `${text}\n`),
+  );
+  if (atEnd) outputLog.scrollTop = outputLog.scrollHeight;
+}
+const openOutput = () => openView(outputView, "Opened Output");
 
-/**
- * Runs a command line from tide.json in the project folder, in the system shell, so pipes, &&,
- * redirects and variables work. Its full output streams to the Output panel, which opens for it.
- */
-async function runLine(label: string, line: string): Promise<{ ok: boolean; output: string }> {
-  panel.show("output");
-  let text = "";
-  let stop = () => {};
-  const run = panel.outputRun(label, line, () => stop());
-  const shell = fs.runShell(project!.root, line, (chunk, err) => { text += chunk; run.write(chunk, err); });
-  stop = () => void shell.stop();
-  const code = await shell.done.catch(err => { const message = `${err}`; text += message; run.write(`${message}\n`, true); return 1; });
-  run.end(code === 0, code);
-  return { ok: code === 0, output: text };
+/** Runs a command line in `dir` (the project folder by default), writing it and its output to the Output tab. */
+async function runLine(
+  label: string,
+  line: string,
+  dir?: string,
+  env?: Record<string, string>,
+): Promise<{ ok: boolean; output: string }> {
+  const { command, args } = splitCommand(line);
+  const cwd = dir ?? project?.root;
+  if (!cwd) throw new Error("Open a folder to run a command in it.");
+  output(`> ${label}: ${line}`, "cmd");
+  const result = await fs.runCommand(cwd, command, args, env);
+  if (result.output.trim()) output(result.output);
+  output(
+    result.ok ? `${label} finished.` : `${label} failed.`,
+    result.ok ? "ok" : "err",
+  );
+  return result;
 }
 
 async function runScript(name: string) {
@@ -558,7 +922,15 @@ async function runScript(name: string) {
     output(String(err), "err");
     setMessage(`Could not run ${name}: ${err}`);
   }
-  await Promise.all([...dirCache.keys()].map(async dir => { try { dirCache.set(dir, await fs.readDir(dir)); } catch { dirCache.delete(dir); } }));
+  await Promise.all(
+    [...dirCache.keys()].map(async (dir) => {
+      try {
+        dirCache.set(dir, await fs.readDir(dir));
+      } catch {
+        dirCache.delete(dir);
+      }
+    }),
+  );
   renderTree();
   void scm.refresh();
 }
@@ -579,7 +951,9 @@ async function runSteps(label: string, list: string[]): Promise<boolean> {
     } catch (err) {
       output(`${step}: ${err instanceof Error ? err.message : err}`, "err");
       openOutput();
-      setMessage(`${label} failed at ${step}: ${err instanceof Error ? err.message : err}`);
+      setMessage(
+        `${label} failed at ${step}: ${err instanceof Error ? err.message : err}`,
+      );
       return false;
     }
   }
@@ -594,13 +968,71 @@ async function prerun(): Promise<boolean> {
   return runSteps("Prerun", list);
 }
 
+let ndlessMakefile: boolean | null = null; // cached for the open project
+/** Whether the project's Makefile builds for the Nspire (Ndless SDK tools) rather than the CE. */
+async function makefileIsNdless(): Promise<boolean> {
+  if (ndlessMakefile !== null) return ndlessMakefile;
+  ndlessMakefile = false;
+  if (project) {
+    for (const name of ["Makefile", "makefile", "GNUmakefile"]) {
+      const text = await fs
+        .readFile(joinPath(project.root, name))
+        .catch(() => null);
+      if (
+        text &&
+        /\b(?:nspire-gcc|nspire-g\+\+|nspire-ld|nspire-as|genzehn|make-prg|NDLESS_HOME)\b/i.test(
+          text,
+        )
+      ) {
+        ndlessMakefile = true;
+        break;
+      }
+    }
+  }
+  return ndlessMakefile;
+}
+
+/** The environment for building a Nspire project: NDLESS_HOME, whose bin folders go on PATH (see run_command). */
+const nspireEnv = async () =>
+  (config.calculator === "nspire" || (await makefileIsNdless())) &&
+  settings().ndlessHome.trim()
+    ? { NDLESS_HOME: settings().ndlessHome.trim() }
+    : undefined;
+
+/** Packs a .lua/.py script into a .tns with Luna (Settings → TI-Nspire → Luna command). Resolves true when it succeeded. */
+async function packWithLuna(
+  srcPath: string,
+  outPath: string,
+): Promise<boolean> {
+  const luna = settings().luna.trim() || "luna";
+  const { ok, output: text } = await runLine(
+    "Luna",
+    `"${luna}" "${baseName(srcPath)}" "${outPath}"`,
+    dirName(srcPath),
+  );
+  const lines = text
+    .split(/\r?\n/)
+    .map((l) => l.trim())
+    .filter(Boolean);
+  const why =
+    lines.find((l) => /\berror\b/i.test(l)) ??
+    lines[lines.length - 1] ??
+    "exited with an error";
+  setMessage(ok ? `Packed ${baseName(outPath)}` : `Luna failed: ${why}`);
+  els.msg.title = text.trim(); // the full output, on hover; it is also in the Output tab
+  return ok;
+}
+
 /** Files in the project matching tide.json's "send" patterns, such as bin/*.8xp. */
 async function matchFiles(root: string, patterns: string[]): Promise<Entry[]> {
   const found = new Map<string, Entry>();
   for (const pattern of patterns) {
     const { dir, match } = splitPattern(pattern);
-    const entries = await fs.readDir(dir ? joinPath(root, dir) : root).catch(() => [] as Entry[]);
-    for (const e of entries) if (!e.isDir && match.test(e.name)) found.set(e.path, e);
+    const entries = await fs
+      .readDir(dir ? joinPath(root, dir) : root)
+      .catch(() => [] as Entry[]);
+    for (const e of entries)
+      if (!e.isDir && match.test(e.name)) found.set(e.path, e);
   }
   return [...found.values()];
 }
@@ -609,15 +1041,22 @@ async function matchFiles(root: string, patterns: string[]): Promise<Entry[]> {
 async function loadConfig(exists = true) {
   config = {};
   const path = configPath();
-  if (path && exists && await configExists()) {
+  if (path && exists && (await configExists())) {
     try {
       config = readConfig(await fs.readFile(path));
     } catch (err) {
-      setMessage(`${CONFIG_DIR}/${CONFIG_FILE} isn't used: ${err instanceof Error ? err.message : err}`);
+      setMessage(
+        `${CONFIG_DIR}/${CONFIG_FILE} isn't used: ${err instanceof Error ? err.message : err}`,
+      );
     }
   }
   setProjectSettings(config.editor ?? {});
-  if (config.calculator && config.calculator !== getTarget()) setTarget(config.calculator);
+  // "nspire" targets the calculator panel's model, not TI-BASIC's screen checks, which stay ce/plus.
+  if (
+    (config.calculator === "ce" || config.calculator === "plus") &&
+    config.calculator !== getTarget()
+  )
+    setTarget(config.calculator);
   calc.setLink(config.link);
   renderScripts();
   applyEditorMode();
@@ -626,14 +1065,17 @@ async function loadConfig(exists = true) {
 /** Whether the open project has .tide/tide.json. */
 async function configExists(): Promise<boolean> {
   if (!project) return false;
-  const entries = await fs.readDir(joinPath(project.root, CONFIG_DIR)).catch(() => [] as Entry[]);
-  return entries.some(e => !e.isDir && e.name.toLowerCase() === CONFIG_FILE);
+  const entries = await fs
+    .readDir(joinPath(project.root, CONFIG_DIR))
+    .catch(() => [] as Entry[]);
+  return entries.some((e) => !e.isDir && e.name.toLowerCase() === CONFIG_FILE);
 }
 
 /** Opens the project's .tide/tide.json, creating it from a starter first if there isn't one. */
 async function openProjectFile() {
   const path = configPath();
-  if (!project || !path) return setMessage("Open a folder to give it a .tide/tide.json.");
+  if (!project || !path)
+    return setMessage("Open a folder to give it a .tide/tide.json.");
   if (!(await configExists())) {
     await fs.writeFile(path, CONFIG_TEMPLATE);
     dirCache.set(project.root, await fs.readDir(project.root));
@@ -652,79 +1094,307 @@ function renderScripts() {
   els.scripts.hidden = !project || !names.length;
   els.scripts.replaceChildren(
     h("option", { value: "", hidden: true }, "Scripts"),
-    ...names.map(n => h("option", { value: n, title: config.scripts![n] }, `${n}: ${config.scripts![n]}`)));
+    ...names.map((n) =>
+      h(
+        "option",
+        { value: n, title: config.scripts![n] },
+        `${n}: ${config.scripts![n]}`,
+      ),
+    ),
+  );
   els.scripts.value = "";
 }
 
 /** Copies a program out of a TI file into TIde's programs. */
 async function importProgram(name: string, source: string) {
-  if (names.includes(name) && !confirm(`Replace your program ${name} with the one in this file?`)) return;
+  if (
+    names.includes(name) &&
+    !confirm(`Replace your program ${name} with the one in this file?`)
+  )
+    return;
   await store.save(name, source);
   if (!names.includes(name)) names = [...names, name].sort();
   const open = docs.get(progId(name));
-  if (open) { open.model.setValue(source); open.savedVersion = open.model.getAlternativeVersionId(); }
+  if (open) {
+    open.model.setValue(source);
+    open.savedVersion = open.model.getAlternativeVersionId();
+  }
   await openProgram(name, `Opened ${name} from the file`);
   void checkPrograms();
 }
 
 /** The Settings tab. */
 function openSettings() {
-  openView(views.get("settings") ?? { id: "settings", label: "Settings", el: settingsPage(settingRows) });
+  openView(
+    views.get("settings") ?? {
+      id: "settings",
+      label: "Settings",
+      el: settingsPage(settingRows),
+    },
+  );
 }
 
 function settingRows(): Row[] {
   const s = settings();
-  const toggle = (key: "wordWrap" | "minimap" | "showRuler" | "sendClibs" | "checkUpdates" | "refreshScmOnFocus" | "shiftDeletes" | "autoSave") =>
-    ({ kind: "toggle" as const, get: () => settings()[key], set: (v: boolean) => setSetting(key, v) });
-  const keyOf: Record<string, string> = { "Font size": "fontSize", "Tab size": "tabSize", "Word wrap": "wordWrap", Minimap: "minimap",
-    "Show whitespace": "renderWhitespace", "Screen width ruler": "showRuler", "Encoding for other text": "fallbackEncoding",
-    "Send clibs.8xg with C projects": "sendClibs" };
+  const toggle = (
+    key:
+      | "wordWrap"
+      | "minimap"
+      | "showRuler"
+      | "sendClibs"
+      | "checkUpdates"
+      | "refreshScmOnFocus"
+      | "shiftDeletes"
+      | "autoSave",
+  ) => ({
+    kind: "toggle" as const,
+    get: () => settings()[key],
+    set: (v: boolean) => setSetting(key, v),
+  });
+  const keyOf: Record<string, string> = {
+    "Font size": "fontSize",
+    "Tab size": "tabSize",
+    "Word wrap": "wordWrap",
+    Minimap: "minimap",
+    "Show whitespace": "renderWhitespace",
+    "Screen width ruler": "showRuler",
+    "Encoding for other text": "fallbackEncoding",
+    "Send clibs.8xg with C projects": "sendClibs",
+  };
   const rows: Row[] = [
-    { section: "Appearance", label: "Theme", description: "Dark or light mode, or whichever your system uses.",
-      control: { kind: "select", options: [["dark", "Dark"], ["light", "Light"], ["system", "Same as the system"]], get: () => s.theme, set: v => setSetting("theme", v as "dark" | "light" | "system") } },
-    { section: "Editor", label: "Font size", description: "Size of text in the editor, in pixels.",
-      control: { kind: "number", min: 9, max: 28, get: () => s.fontSize, set: v => setSetting("fontSize", v) } },
-    { section: "Editor", label: "Tab size", description: "Spaces per indent in C, Python and other files. Assembly always uses tabs.",
-      control: { kind: "select", options: [["2", "2"], ["4", "4"], ["8", "8"]], get: () => String(s.tabSize), set: v => setSetting("tabSize", Number(v)) } },
-    { section: "Editor", label: "Word wrap", description: "Wrap long lines at the edge of the editor.", control: toggle("wordWrap") },
-    { section: "Editor", label: "Minimap", description: "Show an overview of the file beside the editor.", control: toggle("minimap") },
-    { section: "Editor", label: "Show whitespace", description: "Draw spaces and tabs.",
-      control: { kind: "select", options: [["none", "Never"], ["boundary", "Between words"], ["all", "Always"]],
-        get: () => s.renderWhitespace, set: v => setSetting("renderWhitespace", v as typeof s.renderWhitespace) } },
-    { section: "TI-BASIC", label: "Calculator", description: "Which calculator programs are for: sets the screen size checks and which commands exist.",
-      control: { kind: "select", options: [["ce", "TI-84 Plus CE"], ["plus", "TI-84 Plus"]], get: () => getTarget(), set: v => setTarget(v as "ce" | "plus") } },
-    { section: "TI-BASIC", label: "Gutter", description: "Show the calculator's \":\" before each line, or line numbers.",
-      control: { kind: "select", options: [["colon", "\":\" like the calculator"], ["numbers", "Line numbers"]],
-        get: () => (showNumbers ? "numbers" : "colon"), set: v => setGutter(v === "numbers") } },
-    { section: "TI-BASIC", label: "Screen width ruler", description: "Mark the column where a line wraps on the calculator's screen.", control: toggle("showRuler") },
-    { section: "Files", label: "Encoding for other text", description: "How to read a text file that isn't UTF-8 or UTF-16. The status bar can reopen or save a file in any encoding.",
-      control: { kind: "select", options: ENCODINGS.filter(e => !e.bom && e.id !== "utf-8").map(e => [encodingKey(e), e.label]),
-        get: () => s.fallbackEncoding, set: v => setSetting("fallbackEncoding", v) } },
-    { section: "Calculator", label: "Send clibs.8xg with C projects", description: "Send the CE C libraries before running a C project, when TIde finds them.", control: toggle("sendClibs") },
-    { section: "Files", label: "Auto save", description: "Save changed files and programs a second after you stop typing, and when TIde loses focus. Files dropped in from outside still ask where to go on their first save.", control: toggle("autoSave") },
-    { section: "Files", label: "Shift for permanent delete", description: "In the Explorer's right-click menu, show one Delete that holding Shift turns into Delete permanently. Off shows both.", control: toggle("shiftDeletes") },
-    { section: "Source control", label: "Refresh when TIde gets focus", description: "Check git status again when you switch back to TIde.", control: toggle("refreshScmOnFocus") },
-    { section: "Updates", label: "Check for updates on start", description: "Look for a newer TIde when it starts. Desktop app only.", control: toggle("checkUpdates") },
-    { section: "Updates", label: "Check now", description: "Look for a newer version of TIde.",
-      control: { kind: "button", label: "Check for updates", run: () => void checkForUpdate(setMessage) } },
-    { section: "Project", label: CONFIG_FILE, description: project
+    {
+      section: "Appearance",
+      label: "Theme",
+      description: "Dark or light mode, or whichever your system uses.",
+      control: {
+        kind: "select",
+        options: [
+          ["dark", "Dark"],
+          ["light", "Light"],
+          ["system", "Same as the system"],
+        ],
+        get: () => s.theme,
+        set: (v) => setSetting("theme", v as "dark" | "light" | "system"),
+      },
+    },
+    {
+      section: "Editor",
+      label: "Font size",
+      description: "Size of text in the editor, in pixels.",
+      control: {
+        kind: "number",
+        min: 9,
+        max: 28,
+        get: () => s.fontSize,
+        set: (v) => setSetting("fontSize", v),
+      },
+    },
+    {
+      section: "Editor",
+      label: "Tab size",
+      description:
+        "Spaces per indent in C, Python and other files. Assembly always uses tabs.",
+      control: {
+        kind: "select",
+        options: [
+          ["2", "2"],
+          ["4", "4"],
+          ["8", "8"],
+        ],
+        get: () => String(s.tabSize),
+        set: (v) => setSetting("tabSize", Number(v)),
+      },
+    },
+    {
+      section: "Editor",
+      label: "Word wrap",
+      description: "Wrap long lines at the edge of the editor.",
+      control: toggle("wordWrap"),
+    },
+    {
+      section: "Editor",
+      label: "Minimap",
+      description: "Show an overview of the file beside the editor.",
+      control: toggle("minimap"),
+    },
+    {
+      section: "Editor",
+      label: "Show whitespace",
+      description: "Draw spaces and tabs.",
+      control: {
+        kind: "select",
+        options: [
+          ["none", "Never"],
+          ["boundary", "Between words"],
+          ["all", "Always"],
+        ],
+        get: () => s.renderWhitespace,
+        set: (v) =>
+          setSetting("renderWhitespace", v as typeof s.renderWhitespace),
+      },
+    },
+    {
+      section: "TI-BASIC",
+      label: "Calculator",
+      description:
+        "Which calculator programs are for: sets the screen size checks and which commands exist.",
+      control: {
+        kind: "select",
+        options: [
+          ["ce", "TI-84 Plus CE"],
+          ["plus", "TI-84 Plus"],
+        ],
+        get: () => getTarget(),
+        set: (v) => setTarget(v as "ce" | "plus"),
+      },
+    },
+    {
+      section: "TI-BASIC",
+      label: "Gutter",
+      description:
+        'Show the calculator\'s ":" before each line, or line numbers.',
+      control: {
+        kind: "select",
+        options: [
+          ["colon", '":" like the calculator'],
+          ["numbers", "Line numbers"],
+        ],
+        get: () => (showNumbers ? "numbers" : "colon"),
+        set: (v) => setGutter(v === "numbers"),
+      },
+    },
+    {
+      section: "TI-BASIC",
+      label: "Screen width ruler",
+      description:
+        "Mark the column where a line wraps on the calculator's screen.",
+      control: toggle("showRuler"),
+    },
+    {
+      section: "Files",
+      label: "Encoding for other text",
+      description:
+        "How to read a text file that isn't UTF-8 or UTF-16. The status bar can reopen or save a file in any encoding.",
+      control: {
+        kind: "select",
+        options: ENCODINGS.filter((e) => !e.bom && e.id !== "utf-8").map(
+          (e) => [encodingKey(e), e.label],
+        ),
+        get: () => s.fallbackEncoding,
+        set: (v) => setSetting("fallbackEncoding", v),
+      },
+    },
+    {
+      section: "Calculator",
+      label: "Send clibs.8xg with C projects",
+      description:
+        "Send the CE C libraries before running a C project, when TIde finds them.",
+      control: toggle("sendClibs"),
+    },
+    {
+      section: "TI-Nspire",
+      label: "Ndless SDK folder",
+      description:
+        "NDLESS_HOME for building Ndless C/C++ projects: make runs with it set, and its bin folders (nspire-gcc, nspire-ld, genzehn, make-prg) go on PATH. Empty if the toolchain is already on PATH.",
+      control: {
+        kind: "text",
+        get: () => s.ndlessHome,
+        set: (v) => setSetting("ndlessHome", v),
+        placeholder: "path to the Ndless SDK",
+      },
+    },
+    {
+      section: "TI-Nspire",
+      label: "Luna command",
+      description:
+        "How to run Luna, which packs .lua and .py scripts into .tns documents. A path if it isn't on PATH.",
+      control: {
+        kind: "text",
+        get: () => s.luna,
+        set: (v) => setSetting("luna", v),
+        placeholder: "luna",
+      },
+    },
+    {
+      section: "Files",
+      label: "Auto save",
+      description:
+        "Save changed files and programs a second after you stop typing, and when TIde loses focus. Files dropped in from outside still ask where to go on their first save.",
+      control: toggle("autoSave"),
+    },
+    {
+      section: "Files",
+      label: "Shift for permanent delete",
+      description:
+        "In the Explorer's right-click menu, show one Delete that holding Shift turns into Delete permanently. Off shows both.",
+      control: toggle("shiftDeletes"),
+    },
+    {
+      section: "Source control",
+      label: "Refresh when TIde gets focus",
+      description: "Check git status again when you switch back to TIde.",
+      control: toggle("refreshScmOnFocus"),
+    },
+    {
+      section: "Updates",
+      label: "Check for updates on start",
+      description: "Look for a newer TIde when it starts. Desktop app only.",
+      control: toggle("checkUpdates"),
+    },
+    {
+      section: "Updates",
+      label: "Check now",
+      description: "Look for a newer version of TIde.",
+      control: {
+        kind: "button",
+        label: "Check for updates",
+        run: () => void checkForUpdate(setMessage),
+      },
+    },
+    {
+      section: "Project",
+      label: CONFIG_FILE,
+      description: project
         ? `How ${project.name} builds and runs, its calculator, editor settings and scripts. Its editor settings are used instead of these while it's open.`
         : "Open a folder to give it a .tide/tide.json, which sets how it builds and runs.",
-      control: { kind: "button", label: project ? "Open .tide/tide.json" : "No folder open", run: () => void openProjectFile() } },
-    { section: "Reset", label: "Restore defaults", description: "Put every setting above back to how TIde starts.",
-      control: { kind: "button", label: "Restore defaults", run: () => { if (confirm("Restore every setting to its default?")) { resetSettings(); openSettings(); } } } },
+      control: {
+        kind: "button",
+        label: project ? "Open .tide/tide.json" : "No folder open",
+        run: () => void openProjectFile(),
+      },
+    },
+    {
+      section: "Reset",
+      label: "Restore defaults",
+      description: "Put every setting above back to how TIde starts.",
+      control: {
+        kind: "button",
+        label: "Restore defaults",
+        run: () => {
+          if (confirm("Restore every setting to its default?")) {
+            resetSettings();
+            openSettings();
+          }
+        },
+      },
+    },
   ];
   const fromProject = projectSettings();
   for (const row of rows) {
     const key = keyOf[row.label] as keyof typeof fromProject | undefined;
-    if (key && key in fromProject) row.description += ` This project's tide.json sets it to ${JSON.stringify(fromProject[key])}.`;
+    if (key && key in fromProject)
+      row.description += ` This project's tide.json sets it to ${JSON.stringify(fromProject[key])}.`;
   }
   return rows;
 }
 
 function setGutter(numbers: boolean) {
   showNumbers = numbers;
-  try { localStorage.setItem(GUTTER_PREF, showNumbers ? "1" : "0"); } catch { /* storage unavailable */ }
+  try {
+    localStorage.setItem(GUTTER_PREF, showNumbers ? "1" : "0");
+  } catch {
+    /* storage unavailable */
+  }
   applyEditorMode();
 }
 
@@ -743,15 +1413,22 @@ async function createProgram(name: string) {
 // loses focus. Files dropped in from outside are left to a real save, which asks where they go.
 const AUTO_SAVE_MS = 1000;
 const autoSaveTimers = new Map<Doc, number>();
-const autoSavable = (doc: Doc) => settings().autoSave && docs.get(doc.id) === doc && isDirty(doc) && !doc.hint?.startsWith(DROPPED);
+const autoSavable = (doc: Doc) =>
+  settings().autoSave &&
+  docs.get(doc.id) === doc &&
+  isDirty(doc) &&
+  !doc.hint?.startsWith(DROPPED);
 function autoSaveSoon(doc: Doc) {
   window.clearTimeout(autoSaveTimers.get(doc));
   autoSaveTimers.delete(doc);
   if (!autoSavable(doc)) return;
-  autoSaveTimers.set(doc, window.setTimeout(() => {
-    autoSaveTimers.delete(doc);
-    if (autoSavable(doc)) void saveDoc(doc);
-  }, AUTO_SAVE_MS));
+  autoSaveTimers.set(
+    doc,
+    window.setTimeout(() => {
+      autoSaveTimers.delete(doc);
+      if (autoSavable(doc)) void saveDoc(doc);
+    }, AUTO_SAVE_MS),
+  );
 }
 function autoSaveAll() {
   for (const doc of docs.values()) {
@@ -761,13 +1438,20 @@ function autoSaveAll() {
   }
 }
 window.addEventListener("blur", autoSaveAll);
-document.addEventListener("visibilitychange", () => { if (document.hidden) autoSaveAll(); });
+document.addEventListener("visibilitychange", () => {
+  if (document.hidden) autoSaveAll();
+});
 
 async function saveDoc(doc: Doc): Promise<boolean> {
   let saved = true;
   // Changed on disk since it was opened, while it had unsaved changes here: ask before overwriting.
-  if (doc.diskChanged && doc.diskChanged !== "deleted"
-    && !confirm(`${doc.label} changed on disk since TIde read it.\n\nSave your version over it? Cancel keeps both: File → Reload from disk shows the disk's.`)) {
+  if (
+    doc.diskChanged &&
+    doc.diskChanged !== "deleted" &&
+    !confirm(
+      `${doc.label} changed on disk since TIde read it.\n\nSave your version over it? Cancel keeps both: File → Reload from disk shows the disk's.`,
+    )
+  ) {
     return false;
   }
   try {
@@ -775,17 +1459,29 @@ async function saveDoc(doc: Doc): Promise<boolean> {
     // Before the write, so the watcher's report of it isn't taken for a change from elsewhere.
     const before = doc.disk;
     if (doc.encoding) doc.disk = text;
-    try { await doc.write(text); } catch (err) { doc.disk = before; throw err; }
+    try {
+      await doc.write(text);
+    } catch (err) {
+      doc.disk = before;
+      throw err;
+    }
     doc.diskChanged = undefined;
     doc.savedVersion = doc.model.getAlternativeVersionId();
-    if (doc.language === "tibasic") buildErrors.set(doc.label, tokenize(doc.model.getValue()).errors.length);
+    if (doc.language === "tibasic")
+      buildErrors.set(doc.label, tokenize(doc.model.getValue()).errors.length);
     setMessage(`Saved ${doc.label}`);
     const savedPath = doc.id.startsWith("file:") ? doc.id.slice(5) : null;
     emit("save", { name: doc.label, path: savedPath, language: doc.language });
     // Saving an extension's files reloads the extensions, so changes show at once.
     const extDir = extensionsFolder();
-    if (savedPath && extDir && savedPath.toLowerCase().startsWith(extDir.toLowerCase())) {
-      void reloadExtensions().then(() => setMessage(`Saved ${doc.label} and reloaded extensions`));
+    if (
+      savedPath &&
+      extDir &&
+      savedPath.toLowerCase().startsWith(extDir.toLowerCase())
+    ) {
+      void reloadExtensions().then(() =>
+        setMessage(`Saved ${doc.label} and reloaded extensions`),
+      );
     }
     if (doc.id.startsWith("file:")) void scm.refresh();
     if (doc.hint && doc.hint === configPath()) await loadConfig();
@@ -809,21 +1505,31 @@ async function saveActive() {
  * makefile would, with the log streaming to Output. Writes bin/ (the .8xp and the linked .obj) back
  * to the project.
  */
-async function buildInBrowser(line: string): Promise<{ ok: boolean; output: string }> {
+async function buildInBrowser(
+  line: string,
+): Promise<{ ok: boolean; output: string }> {
   panel.show("output");
   let text = "";
   const run = panel.outputRun("Build", `${line} (in the browser)`, () => {});
-  const log = (chunk: string, err: boolean) => { text += chunk; run.write(chunk, err); };
+  const log = (chunk: string, err: boolean) => {
+    text += chunk;
+    run.write(chunk, err);
+  };
   try {
     // Commands joined with && run one after another, as in a shell (webmake.ts).
     const result = await runWebMake(line, {
-      files: dir => projectFiles(dir),
-      write: (rel, bytes) => fs.writeBinary(joinPath(project!.root, rel), bytes),
-      remove: rel => fs.deletePath(joinPath(project!.root, rel), false).catch(() => { /* not there */ }),
+      files: (dir) => projectFiles(dir),
+      write: (rel, bytes) =>
+        fs.writeBinary(joinPath(project!.root, rel), bytes),
+      remove: (rel) =>
+        fs.deletePath(joinPath(project!.root, rel), false).catch(() => {
+          /* not there */
+        }),
       log,
     });
     run.end(result.ok, result.ok ? 0 : 1);
-    if (result.ok && result.names.length) text += `\n${result.names.join("\n")}\n`;
+    if (result.ok && result.names.length)
+      text += `\n${result.names.join("\n")}\n`;
     // Last, so the status bar shows it: what the browser left out.
     if (result.ok && result.skipped.length) {
       const note = `Left out ${result.skipped.length} step${result.skipped.length === 1 ? "" : "s"} that need${result.skipped.length === 1 ? "s" : ""} a shell or the desktop app (listed in Output).`;
@@ -841,23 +1547,41 @@ async function buildProject(): Promise<boolean> {
   if (!project || building) return false;
   const { name } = project;
   for (const doc of docs.values()) {
-    if (doc.id.startsWith("file:") && isDirty(doc) && !(await saveDoc(doc))) return false;
+    if (doc.id.startsWith("file:") && isDirty(doc) && !(await saveDoc(doc)))
+      return false;
   }
   building = true;
   els.exportBtn.disabled = true;
   setMessage(`Building ${name}…`);
   try {
     const line = config.build ?? "make";
-    const { ok, output } = fs.web ? await buildInBrowser(line) : await runLine("Build", line);
-    const lines = output.split(/\r?\n/).map(l => l.trim()).filter(Boolean);
+    const env = await nspireEnv();
+    const { ok, output } =
+      fs.web && !env
+        ? await buildInBrowser(line)
+        : await runLine("Build", line, undefined, env);
+    const lines = output
+      .split(/\r?\n/)
+      .map((l) => l.trim())
+      .filter(Boolean);
     const last = lines[lines.length - 1] ?? "";
-    const why = ok ? last : lines.find(l => /\berror\b/i.test(l)) ?? last;
-    setMessage(ok ? `Built ${name}${why ? `: ${why}` : ""}` : `Build failed: ${why || `${splitCommand(line).command} exited with an error`} (full log in Output)`);
+    const why = ok ? last : (lines.find((l) => /\berror\b/i.test(l)) ?? last);
+    setMessage(
+      ok
+        ? `Built ${name}${why ? `: ${why}` : ""}`
+        : `Build failed: ${why || `${splitCommand(line).command} exited with an error`} (full log in Output)`,
+    );
     els.msg.title = output.trim(); // the full build output, on hover; it is also in the Output tab
     // The build usually creates folders like bin/ and obj/.
-    await Promise.all([...dirCache.keys()].map(async dir => {
-      try { dirCache.set(dir, await fs.readDir(dir)); } catch { dirCache.delete(dir); }
-    }));
+    await Promise.all(
+      [...dirCache.keys()].map(async (dir) => {
+        try {
+          dirCache.set(dir, await fs.readDir(dir));
+        } catch {
+          dirCache.delete(dir);
+        }
+      }),
+    );
     renderTree();
     void scm.refresh();
     return ok;
@@ -873,7 +1597,12 @@ async function buildProject(): Promise<boolean> {
 /** Downloads CEmu the first time, after asking. Resolves true once it is installed. */
 async function ensureEmulator(): Promise<boolean> {
   if (await fs.emulator.status()) return true;
-  if (!confirm("Running needs CEmu, the TI-84 Plus CE emulator. Download it from its GitHub releases (about 20 MB)?\n\nThe first time it starts, CEmu asks for your calculator's ROM.")) return false;
+  if (
+    !confirm(
+      "Running needs CEmu, the TI-84 Plus CE emulator. Download it from its GitHub releases (about 20 MB)?\n\nThe first time it starts, CEmu asks for your calculator's ROM.",
+    )
+  )
+    return false;
   setMessage("Downloading CEmu…");
   try {
     await fs.emulator.install();
@@ -885,50 +1614,163 @@ async function ensureEmulator(): Promise<boolean> {
 }
 
 /** A built program ready to run: its file name, bytes, and (for the CEmu app) a path on disk. */
-interface Built { name: string; bytes: Uint8Array; path?: string }
-interface ForRun { programs: Built[]; launch: string; libs: Built[] }
+interface Built {
+  name: string;
+  bytes: Uint8Array;
+  path?: string;
+}
+interface ForRun {
+  programs: Built[];
+  launch: string;
+  libs: Built[];
+}
 
 /** Builds the active TI-BASIC program, or the C project with make, into .8xp files to run. */
 async function buildForRun(): Promise<ForRun | null> {
-  if (!fs.available) { setMessage("Running programs needs the desktop app."); return null; }
+  if (!fs.available) {
+    setMessage("Running programs needs the desktop app.");
+    return null;
+  }
+  // A project is for the Nspire when tide.json says so, or when its Makefile uses the Ndless SDK's tools.
+  const nspire = config.calculator === "nspire" || (await makefileIsNdless());
   if (isBasic()) {
     // TI-BASIC runs as an .8xp: on the CE when the target is CE, or on a TI-83 Plus or 84 Plus.
     const family = await calc.family();
-    if (family === "ce" && getTarget() === "plus") { setMessage("The calculator is a TI-84 Plus CE. Switch Target to CE, or pick a TI-84 Plus in the calculator's model menu."); return null; }
-    if (family === "other") { setMessage("Run sends .8xp programs, for the TI-83 Plus, 84 Plus and CE. Pick one in the calculator's model menu."); return null; }
+    if (family === "ce" && getTarget() === "plus") {
+      setMessage(
+        "The calculator is a TI-84 Plus CE. Switch Target to CE, or pick a TI-84 Plus in the calculator's model menu.",
+      );
+      return null;
+    }
+    if (family !== "ce" && family !== "plus") {
+      setMessage(
+        "Run sends .8xp programs, for the TI-83 Plus, 84 Plus and CE. Pick one in the calculator's model menu.",
+      );
+      return null;
+    }
   }
   if (assemblesActive()) {
     const built = await assembleActive();
     if (!built) return null;
     if (!(await prerun())) return null;
-    return { programs: [{ name: `${built.name}.8xp`, path: built.path, bytes: built.bytes }], launch: built.name, libs: [] };
+    return {
+      programs: [
+        { name: `${built.name}.8xp`, path: built.path, bytes: built.bytes },
+      ],
+      launch: built.name,
+      libs: [],
+    };
   }
   if (usesMake()) {
     const root = project!.root;
+    if (nspire && (await calc.family()) !== "nspire") {
+      setMessage(
+        "This project builds .tns files for the TI-Nspire CX. Pick the TI-Nspire CX in the calculator's model menu.",
+      );
+      return null;
+    }
     if (!(await buildProject())) return null;
     if (!(await prerun())) return null; // before matching, so files it makes are sent
-    const patterns = config.send ?? ["bin/*.8xp", "bin/*.8xv"];
+    const patterns =
+      config.send ??
+      (nspire ? ["*.tns", "bin/*.tns"] : ["bin/*.8xp", "bin/*.8xv"]);
     const built = await matchFiles(root, patterns);
-    if (!built.length) { setMessage(`Nothing to send: no files match ${patterns.join(", ")}.`); return null; }
-    const programs = await Promise.all(built.map(async e => ({ name: e.name, path: e.path, bytes: await fs.readBinary(e.path) })));
-    const launch = config.program ?? built.find(e => /\.8xp$/i.test(e.name))?.name.replace(/\.8xp$/i, "").toUpperCase() ?? "";
+    if (!built.length) {
+      setMessage(`Nothing to send: no files match ${patterns.join(", ")}.`);
+      return null;
+    }
+    const programs = await Promise.all(
+      built.map(async (e) => ({
+        name: e.name,
+        path: e.path,
+        bytes: await fs.readBinary(e.path),
+      })),
+    );
+    // The Nspire starts a .tns from its own UI, so there is nothing to launch by name.
+    const launch = nspire
+      ? (config.program ?? "")
+      : (config.program ??
+        built
+          .find((e) => /\.8xp$/i.test(e.name))
+          ?.name.replace(/\.8xp$/i, "")
+          .toUpperCase() ??
+        "");
     // C programs that use graphx, keypadc or fileioc need the CE C libraries on the calculator.
     let libPaths: string[] = [];
-    if (Array.isArray(config.libraries)) libPaths = config.libraries.map(p => joinPath(root, p));
-    else if (config.libraries ?? settings().sendClibs) {
-      const clibs = await fs.findClibs(root).catch(() => null);
-      if (clibs) libPaths = [clibs];
+    if (!nspire) {
+      if (Array.isArray(config.libraries))
+        libPaths = config.libraries.map((p) => joinPath(root, p));
+      else if (config.libraries ?? settings().sendClibs) {
+        const clibs = await fs.findClibs(root).catch(() => null);
+        if (clibs) libPaths = [clibs];
+      }
     }
-    const libs = await Promise.all(libPaths.map(async p => ({ name: baseName(p), path: p, bytes: await fs.readBinary(p) })));
+    const libs = await Promise.all(
+      libPaths.map(async (p) => ({
+        name: baseName(p),
+        path: p,
+        bytes: await fs.readBinary(p),
+      })),
+    );
     return { programs, launch, libs };
   }
   const doc = activeDoc();
-  if (!doc || doc.language !== "tibasic") { setMessage("Open a TI-BASIC program or a C project to run it."); return null; }
+  if (doc && nspireScript(doc)) {
+    // A .lua (or, in a "nspire" project, a .py) script runs as a Luna-packed .tns on the Nspire.
+    const family = await calc.family();
+    if (family !== "nspire") {
+      setMessage(
+        "Run sends .tns files to a TI-Nspire CX. Pick one in the calculator's model menu.",
+      );
+      return null;
+    }
+    if (isDirty(doc)) await saveDoc(doc);
+    const path = doc.id.startsWith("file:") ? doc.id.slice(5) : null;
+    if (!path) {
+      setMessage(
+        "Open the script from a folder — Luna packs the file on disk.",
+      );
+      return null;
+    }
+    if (!(await prerun())) return null;
+    const outPath = joinPath(
+      dirName(path),
+      `${baseName(path).replace(/\.(lua|py)$/i, "")}.tns`,
+    );
+    if (!(await packWithLuna(path, outPath))) {
+      openOutput();
+      return null;
+    }
+    return {
+      programs: [
+        {
+          name: baseName(outPath),
+          path: outPath,
+          bytes: await fs.readBinary(outPath),
+        },
+      ],
+      launch: "",
+      libs: [],
+    };
+  }
+  if (!doc || doc.language !== "tibasic") {
+    setMessage(
+      "Open a TI-BASIC program, a Nspire script (.lua or .py), or a C/C++ project to run it.",
+    );
+    return null;
+  }
   if (isDirty(doc)) await saveDoc(doc);
   const { bytes, errors } = tokenize(doc.model.getValue());
-  if (errors.length) setMessage(`${errors.length} character${errors.length === 1 ? "" : "s"} had no token and were skipped.`);
+  if (errors.length)
+    setMessage(
+      `${errors.length} character${errors.length === 1 ? "" : "s"} had no token and were skipped.`,
+    );
   if (!(await prerun())) return null;
-  return { programs: [{ name: `${doc.label}.8xp`, bytes: make8xp(doc.label, bytes) }], launch: doc.label, libs: [] };
+  return {
+    programs: [{ name: `${doc.label}.8xp`, bytes: make8xp(doc.label, bytes) }],
+    launch: doc.label,
+    libs: [],
+  };
 }
 
 /** F5: builds and runs in the calculator panel, inside TIde. */
@@ -938,9 +1780,13 @@ async function runInEmulator() {
     const built = await buildForRun();
     if (!built) return;
     await calc.run(built.programs, built.launch, built.libs);
-    emit("run", { programs: built.programs.map(p => p.name), launch: built.launch });
+    emit("run", {
+      programs: built.programs.map((p) => p.name),
+      launch: built.launch,
+    });
     const post = project ? steps(config.postrun) : [];
-    if (post.length && await runSteps("Postrun", post)) setMessage("Postrun finished");
+    if (post.length && (await runSteps("Postrun", post)))
+      setMessage("Postrun finished");
   } catch (err) {
     setMessage(`Could not run: ${err}`);
   }
@@ -951,10 +1797,18 @@ async function runInCemu() {
   try {
     const built = await buildForRun();
     if (!built) return;
-    const files = await Promise.all([...built.libs, ...built.programs].map(p => p.path ?? fs.emulator.stage(p.name.replace(/\.8xp$/i, ""), Array.from(p.bytes))));
+    const files = await Promise.all(
+      [...built.libs, ...built.programs].map(
+        (p) =>
+          p.path ??
+          fs.emulator.stage(p.name.replace(/\.8xp$/i, ""), Array.from(p.bytes)),
+      ),
+    );
     if (!(await ensureEmulator())) return;
     await fs.emulator.run(files, built.launch);
-    setMessage(built.launch ? `Running ${built.launch} in CEmu` : "Sent to CEmu");
+    setMessage(
+      built.launch ? `Running ${built.launch} in CEmu` : "Sent to CEmu",
+    );
   } catch (err) {
     setMessage(`Could not run in CEmu: ${err}`);
   }
@@ -962,54 +1816,115 @@ async function runInCemu() {
 
 /** Where each program was last built, so a rebuild can skip the save dialog. */
 function buildPaths(): Record<string, string> {
-  try { return JSON.parse(localStorage.getItem(BUILD_PREF) ?? "{}"); } catch { return {}; }
+  try {
+    return JSON.parse(localStorage.getItem(BUILD_PREF) ?? "{}");
+  } catch {
+    return {};
+  }
 }
 function rememberBuild(name: string, path: string | null) {
   const paths = buildPaths();
-  if (path) paths[name] = path; else delete paths[name];
-  try { localStorage.setItem(BUILD_PREF, JSON.stringify(paths)); } catch { /* storage unavailable */ }
+  if (path) paths[name] = path;
+  else delete paths[name];
+  try {
+    localStorage.setItem(BUILD_PREF, JSON.stringify(paths));
+  } catch {
+    /* storage unavailable */
+  }
 }
 
 /** Tokenizes the active TI-BASIC program and writes a real .8xp the calculator accepts. Asks where only the first time, or when `pick` is set. */
 async function exportActive(pick = false) {
-  if (assemblesActive()) { await assembleActive(); return; }
+  if (assemblesActive()) {
+    await assembleActive();
+    return;
+  }
   if (usesMake()) return buildProject();
   const doc = activeDoc();
   if (!doc) return setMessage("Nothing to build.");
-  if (doc.language !== "tibasic") return setMessage("Only TI-BASIC programs build to .8xp.");
+  if (nspireScript(doc)) {
+    // A Nspire script builds to a .tns with Luna, asking where only the first time, like .8xp.
+    if (isDirty(doc)) await saveActive();
+    const path = doc.id.startsWith("file:") ? doc.id.slice(5) : null;
+    if (!path)
+      return setMessage(
+        "Open the script from a folder — Luna packs the file on disk.",
+      );
+    let out: string | undefined = pick ? undefined : buildPaths()[doc.label];
+    if (!out)
+      out =
+        (await fs.pickSaveFile(`${doc.label}.tns`, {
+          name: "TI-Nspire document",
+          extensions: ["tns"],
+        })) ?? undefined;
+    if (!out) return; // cancelled the save dialog
+    if (!/\.tns$/i.test(out)) out += ".tns";
+    rememberBuild(doc.label, out);
+    if (await packWithLuna(path, out)) {
+      await Promise.all(
+        [...dirCache.keys()].map(async (dir) => {
+          try {
+            dirCache.set(dir, await fs.readDir(dir));
+          } catch {
+            dirCache.delete(dir);
+          }
+        }),
+      );
+      renderTree();
+    } else openOutput();
+    return;
+  }
+  if (doc.language !== "tibasic")
+    return setMessage(
+      "Only TI-BASIC programs build to .8xp, and Nspire scripts to .tns.",
+    );
   if (isDirty(doc)) await saveActive();
   const { bytes, errors } = tokenize(doc.model.getValue());
   let path: string | null;
   try {
-    path = await exportProgram(doc.label, bytes, pick ? undefined : buildPaths()[doc.label]);
+    path = await exportProgram(
+      doc.label,
+      bytes,
+      pick ? undefined : buildPaths()[doc.label],
+    );
   } catch (err) {
     return setMessage(`Could not build ${doc.label}: ${err}`);
   }
   if (!path) return; // cancelled the save dialog
   if (fs.available) rememberBuild(doc.label, path);
-  setMessage(errors.length
-    ? `Built ${path} — ${errors.length} character${errors.length === 1 ? "" : "s"} had no token and were skipped.`
-    : `Built ${path}`);
+  setMessage(
+    errors.length
+      ? `Built ${path} — ${errors.length} character${errors.length === 1 ? "" : "s"} had no token and were skipped.`
+      : `Built ${path}`,
+  );
 }
 
 /** Tokenize every stored program so the list can show which ones build cleanly. */
 async function checkPrograms() {
-  const sources = await Promise.all(names.map(n => store.load(n)));
-  names.forEach((n, i) => buildErrors.set(n, tokenize(sources[i]).errors.length));
+  const sources = await Promise.all(names.map((n) => store.load(n)));
+  names.forEach((n, i) =>
+    buildErrors.set(n, tokenize(sources[i]).errors.length),
+  );
   renderList();
 }
 
 function closeTab(id: string) {
   const doc = docs.get(id);
-  if (doc && isDirty(doc) && !confirm(`${doc.label} has unsaved changes. Close without saving?`)) return;
+  if (
+    doc &&
+    isDirty(doc) &&
+    !confirm(`${doc.label} has unsaved changes. Close without saving?`)
+  )
+    return;
   const index = tabOrder.indexOf(id);
-  tabOrder = tabOrder.filter(n => n !== id);
+  tabOrder = tabOrder.filter((n) => n !== id);
   doc?.model.dispose();
   docs.delete(id);
   views.delete(id);
   if (active === id) {
     active = tabOrder[Math.min(index, tabOrder.length - 1)] ?? null;
-    if (active) activate(active); else showActive();
+    if (active) activate(active);
+    else showActive();
   }
   if (id === CALC_TAB && calc.visible) calc.hide();
   refresh();
@@ -1023,11 +1938,14 @@ async function deleteProgram(name: string) {
     setMessage(`Could not delete ${name}: ${err}`);
     return;
   }
-  names = names.filter(n => n !== name);
+  names = names.filter((n) => n !== name);
   buildErrors.delete(name);
   rememberBuild(name, null);
   const doc = docs.get(progId(name));
-  if (doc) { doc.savedVersion = doc.model.getAlternativeVersionId(); closeTab(doc.id); }
+  if (doc) {
+    doc.savedVersion = doc.model.getAlternativeVersionId();
+    closeTab(doc.id);
+  }
   setMessage(`Deleted ${name}`);
   refresh();
 }
@@ -1037,12 +1955,19 @@ async function loadProject(root: string, reveal = true) {
   dirCache.clear();
   expanded.clear();
   dirCache.set(root, entries);
-  const hasMakefile = entries.some(e => !e.isDir && /^(?:gnu)?makefile$/i.test(e.name));
+  const hasMakefile = entries.some(
+    (e) => !e.isDir && /^(?:gnu)?makefile$/i.test(e.name),
+  );
   project = { root, name: baseName(root), hasMakefile };
   targetDir = null;
   creating = null;
-  try { localStorage.setItem(PROJECT_PREF, root); } catch { /* storage unavailable */ }
-  await loadConfig(entries.some(e => e.isDir && e.name === CONFIG_DIR));
+  ndlessMakefile = null;
+  try {
+    localStorage.setItem(PROJECT_PREF, root);
+  } catch {
+    /* storage unavailable */
+  }
+  await loadConfig(entries.some((e) => e.isDir && e.name === CONFIG_DIR));
   if (reveal) showPane("files");
   renderTree();
   applyEditorMode(); // the docs and Build button follow the project type
@@ -1050,22 +1975,38 @@ async function loadProject(root: string, reveal = true) {
   void scm.refresh();
   emit("project", { root, name: project.name });
   panel.projectChanged(root);
-  void fs.watchFolder(root).catch(err => console.error("Couldn't watch the folder", err));
+  void fs
+    .watchFolder(root)
+    .catch((err) => console.error("Couldn't watch the folder", err));
 }
 
 // ── Live folders: the Explorer re-reads a folder when anything changes in it ──
-const samePath = (p: string) => p.replace(/[\\/]+$/, "").replace(/\\/g, "/").toLowerCase();
+const samePath = (p: string) =>
+  p
+    .replace(/[\\/]+$/, "")
+    .replace(/\\/g, "/")
+    .toLowerCase();
 async function foldersChanged(dirs: string[]) {
   if (!project) return;
   const changed = new Set(dirs.map(samePath));
   // Only folders the Explorer has read: the rest are read when they're opened.
-  const stale = [...dirCache.keys()].filter(dir => changed.has(samePath(dir)));
-  await Promise.all(stale.map(async dir => {
-    try { dirCache.set(dir, await fs.readDir(dir)); } catch { dirCache.delete(dir); expanded.delete(dir); }
-  }));
+  const stale = [...dirCache.keys()].filter((dir) =>
+    changed.has(samePath(dir)),
+  );
+  await Promise.all(
+    stale.map(async (dir) => {
+      try {
+        dirCache.set(dir, await fs.readDir(dir));
+      } catch {
+        dirCache.delete(dir);
+        expanded.delete(dir);
+      }
+    }),
+  );
   // Not while a new file's name is being typed: the tree is drawn again when that's done.
   if (stale.length && !creating) renderTree();
-  if (changed.has(samePath(joinPath(project.root, CONFIG_DIR)))) await loadConfig();
+  if (changed.has(samePath(joinPath(project.root, CONFIG_DIR))))
+    await loadConfig();
   // Open files in those folders: reloaded if they changed there.
   refreshOpenFiles(changed);
 }
@@ -1090,7 +2031,9 @@ async function reloadFromDisk(doc: Doc, force = false) {
   } catch {
     if (doc.diskChanged === "deleted" || docs.get(doc.id) !== doc) return;
     doc.diskChanged = "deleted";
-    setMessage(`${doc.label} was deleted or moved outside TIde. Its tab stays open; saving writes it again.`);
+    setMessage(
+      `${doc.label} was deleted or moved outside TIde. Its tab stays open; saving writes it again.`,
+    );
     return;
   }
   if (docs.get(doc.id) !== doc) return; // closed meanwhile
@@ -1099,13 +2042,19 @@ async function reloadFromDisk(doc: Doc, force = false) {
   if (isDirty(doc) && !force) {
     if (doc.diskChanged === text) return;
     doc.diskChanged = text;
-    setMessage(`${doc.label} changed on disk. Your unsaved changes are kept: saving asks before overwriting, and File → Reload from disk takes the disk's version.`);
+    setMessage(
+      `${doc.label} changed on disk. Your unsaved changes are kept: saving asks before overwriting, and File → Reload from disk takes the disk's version.`,
+    );
     return;
   }
   // In place, as one edit: the cursor, scroll and undo history stay.
   const showing = active === doc.id;
   const view = showing ? editor.saveViewState() : null;
-  doc.model.pushEditOperations([], [{ range: doc.model.getFullModelRange(), text }], () => null);
+  doc.model.pushEditOperations(
+    [],
+    [{ range: doc.model.getFullModelRange(), text }],
+    () => null,
+  );
   doc.disk = text;
   doc.diskChanged = undefined;
   doc.savedVersion = doc.model.getAlternativeVersionId();
@@ -1127,15 +2076,28 @@ function refreshOpenFiles(dirs?: Set<string>) {
 // TIde changes) is looked at again every couple of seconds while TIde shows, and when it gets focus.
 if (fs.web) {
   const look = async () => {
-    if (!project || project.root.startsWith("/Browser/") || document.hidden) return;
+    if (!project || project.root.startsWith("/Browser/") || document.hidden)
+      return;
     let changed = false;
-    await Promise.all([...dirCache.keys()].map(async dir => {
-      try {
-        const now = await fs.readDir(dir);
-        const was = dirCache.get(dir) ?? [];
-        if (now.length !== was.length || now.some((e, i) => e.name !== was[i]?.name || e.isDir !== was[i]?.isDir)) { dirCache.set(dir, now); changed = true; }
-      } catch { /* gone, or not allowed now */ }
-    }));
+    await Promise.all(
+      [...dirCache.keys()].map(async (dir) => {
+        try {
+          const now = await fs.readDir(dir);
+          const was = dirCache.get(dir) ?? [];
+          if (
+            now.length !== was.length ||
+            now.some(
+              (e, i) => e.name !== was[i]?.name || e.isDir !== was[i]?.isDir,
+            )
+          ) {
+            dirCache.set(dir, now);
+            changed = true;
+          }
+        } catch {
+          /* gone, or not allowed now */
+        }
+      }),
+    );
     if (changed && !creating) renderTree();
     refreshOpenFiles();
   };
@@ -1145,8 +2107,15 @@ if (fs.web) {
 
 if (fs.desktop) {
   import("@tauri-apps/api/event")
-    .then(({ listen }) => listen<{ dirs: string[] }>("folder://changed", e => void foldersChanged(e.payload.dirs)))
-    .catch(() => { /* not in the desktop app */ });
+    .then(({ listen }) =>
+      listen<{ dirs: string[] }>(
+        "folder://changed",
+        (e) => void foldersChanged(e.payload.dirs),
+      ),
+    )
+    .catch(() => {
+      /* not in the desktop app */
+    });
 }
 
 /** Web only: opens or makes a project kept in the browser's storage. */
@@ -1155,18 +2124,26 @@ async function openBrowserProject() {
     const root = await fs.pickBrowserProject?.();
     if (root) await loadProject(root);
   } catch (err) {
-    setMessage(`Could not open the project: ${err instanceof Error ? err.message : err}`);
+    setMessage(
+      `Could not open the project: ${err instanceof Error ? err.message : err}`,
+    );
   }
 }
 
 async function openFolder() {
-  if (!fs.available) { setMessage("Opening folders needs the desktop app."); return; }
+  if (!fs.available) {
+    setMessage("Opening folders needs the desktop app.");
+    return;
+  }
   try {
     const root = await fs.pickFolder();
     if (!root) return;
     await loadProject(root);
     // Browsers that can't write to folders on your computer get a copy kept in the browser.
-    if (fs.web && root.startsWith("/Browser/")) setMessage(`Opened a copy of ${baseName(root)}, kept in this browser: this browser can't save into folders on your computer. Chrome and Edge can.`);
+    if (fs.web && root.startsWith("/Browser/"))
+      setMessage(
+        `Opened a copy of ${baseName(root)}, kept in this browser: this browser can't save into folders on your computer. Chrome and Edge can.`,
+      );
   } catch (err) {
     setMessage(`Could not open folder: ${err}`);
   }
@@ -1189,37 +2166,75 @@ async function toggleDir(entry: Entry) {
   renderTree();
 }
 
-function setMessage(text: string) { els.msg.textContent = text; els.msg.title = text; }
+function setMessage(text: string) {
+  els.msg.textContent = text;
+  els.msg.title = text;
+}
 
 // ── Rendering ──────────────────────────────────────────────────────────────
 
 function renderList() {
   const query = els.find.value.toUpperCase();
-  const shown = names.filter(n => n.includes(query));
-  els.list.replaceChildren(...shown.map(n => {
-    const doc = docs.get(progId(n));
-    // Open programs are checked live against their model; closed ones use the last checked source.
-    const errors = doc ? tokenize(doc.model.getValue()).errors.length : buildErrors.get(n) ?? 0;
-    const row = h("li", { role: "option", tabIndex: 0 },
-      ...(errors ? [h("span", { className: "bad", title: `${errors} character${errors === 1 ? "" : "s"} won't tokenize — the .8xp will skip them.` }, "!")] : []),
-      h("span", { className: "name" }, n),
-      ...(doc && isDirty(doc) ? [h("span", { className: "unsaved", title: "Unsaved changes" }, "●")] : []),
-      h("button", { className: "del", title: `Delete ${n}`, onclick: (e: Event) => { e.stopPropagation(); void deleteProgram(n); } }, "×"),
-    );
-    row.setAttribute("aria-selected", String(progId(n) === active));
-    row.onclick = () => void openProgram(n);
-    row.dataset.program = n;
-    row.onkeydown = e => { if (e.key === "Enter") void openProgram(n); };
-    return row;
-  }));
+  const shown = names.filter((n) => n.includes(query));
+  els.list.replaceChildren(
+    ...shown.map((n) => {
+      const doc = docs.get(progId(n));
+      // Open programs are checked live against their model; closed ones use the last checked source.
+      const errors = doc
+        ? tokenize(doc.model.getValue()).errors.length
+        : (buildErrors.get(n) ?? 0);
+      const row = h(
+        "li",
+        { role: "option", tabIndex: 0 },
+        ...(errors
+          ? [
+              h(
+                "span",
+                {
+                  className: "bad",
+                  title: `${errors} character${errors === 1 ? "" : "s"} won't tokenize — the .8xp will skip them.`,
+                },
+                "!",
+              ),
+            ]
+          : []),
+        h("span", { className: "name" }, n),
+        ...(doc && isDirty(doc)
+          ? [h("span", { className: "unsaved", title: "Unsaved changes" }, "●")]
+          : []),
+        h(
+          "button",
+          {
+            className: "del",
+            title: `Delete ${n}`,
+            onclick: (e: Event) => {
+              e.stopPropagation();
+              void deleteProgram(n);
+            },
+          },
+          "×",
+        ),
+      );
+      row.setAttribute("aria-selected", String(progId(n) === active));
+      row.onclick = () => void openProgram(n);
+      row.dataset.program = n;
+      row.onkeydown = (e) => {
+        if (e.key === "Enter") void openProgram(n);
+      };
+      return row;
+    }),
+  );
   els.listEmpty.hidden = names.length > 0 || !!query;
 }
 
 function treeRows(path: string, depth: number, out: HTMLElement[]) {
-  if (creating?.dir === path) out.push(creating.row ??= nameBoxRow(path, creating.kind, depth)); // the same box across redraws
+  if (creating?.dir === path)
+    out.push((creating.row ??= nameBoxRow(path, creating.kind, depth))); // the same box across redraws
   for (const entry of dirCache.get(path) ?? []) {
     const open = entry.isDir && expanded.has(entry.path);
-    const row = h("li", { role: "treeitem", tabIndex: 0, title: entry.path },
+    const row = h(
+      "li",
+      { role: "treeitem", tabIndex: 0, title: entry.path },
       h("span", { className: "twisty" }, entry.isDir ? (open ? "▾" : "▸") : ""),
       h("span", { className: "name" }, entry.name),
     );
@@ -1229,12 +2244,23 @@ function treeRows(path: string, depth: number, out: HTMLElement[]) {
     row.dataset.path = entry.path;
     row.dataset.dir = String(entry.isDir);
     if (entry.isDir) row.setAttribute("aria-expanded", String(open));
-    row.setAttribute("aria-selected", String(!entry.isDir && fileId(entry.path) === active));
-    const act = () => { targetDir = entry.isDir ? entry.path : parentOf(entry.path); void (entry.isDir ? toggleDir(entry) : openFile(entry)); };
+    row.setAttribute(
+      "aria-selected",
+      String(!entry.isDir && fileId(entry.path) === active),
+    );
+    const act = () => {
+      targetDir = entry.isDir ? entry.path : parentOf(entry.path);
+      void (entry.isDir ? toggleDir(entry) : openFile(entry));
+    };
     row.onclick = act;
-    row.onkeydown = e => {
-      if (e.key === "Enter" || e.key === " ") { e.preventDefault(); act(); }
-      else if (e.key === "Delete") { e.preventDefault(); void deleteEntry(entry.path, entry.isDir, e.shiftKey); }
+    row.onkeydown = (e) => {
+      if (e.key === "Enter" || e.key === " ") {
+        e.preventDefault();
+        act();
+      } else if (e.key === "Delete") {
+        e.preventDefault();
+        void deleteEntry(entry.path, entry.isDir, e.shiftKey);
+      }
     };
     out.push(row);
     if (open) treeRows(entry.path, depth + 1, out);
@@ -1249,30 +2275,58 @@ function renderTree() {
   els.treeEmpty.hidden = project !== null;
   const rows: HTMLElement[] = [];
   if (project) treeRows(project.root, 0, rows);
-  const typing = !!creating?.row && creating.row.contains(document.activeElement);
+  const typing =
+    !!creating?.row && creating.row.contains(document.activeElement);
   els.tree.replaceChildren(...rows);
   if (typing) creating!.row!.querySelector("input")?.focus();
 }
 
 function renderTabs() {
-  els.tabs.replaceChildren(...tabOrder.map(id => {
-    const doc = docs.get(id), item = (doc ?? views.get(id))!;
-    const tab = h("div", { className: `tab${doc ? "" : " view-tab"}`, role: "tab", tabIndex: 0, title: item.hint ?? item.label, onclick: () => activate(id) },
-      item.label,
-      ...(doc && isDirty(doc) ? [h("span", { className: "dirty", title: "Unsaved changes" })] : []),
-      h("button", { className: "close", title: `Close ${item.label}`, onclick: (e: Event) => { e.stopPropagation(); closeTab(id); } }, "×"),
-    );
-    tab.setAttribute("aria-selected", String(id === active));
-    tab.dataset.tab = id;
-    return tab;
-  }));
+  els.tabs.replaceChildren(
+    ...tabOrder.map((id) => {
+      const doc = docs.get(id),
+        item = (doc ?? views.get(id))!;
+      const tab = h(
+        "div",
+        {
+          className: `tab${doc ? "" : " view-tab"}`,
+          role: "tab",
+          tabIndex: 0,
+          title: item.hint ?? item.label,
+          onclick: () => activate(id),
+        },
+        item.label,
+        ...(doc && isDirty(doc)
+          ? [h("span", { className: "dirty", title: "Unsaved changes" })]
+          : []),
+        h(
+          "button",
+          {
+            className: "close",
+            title: `Close ${item.label}`,
+            onclick: (e: Event) => {
+              e.stopPropagation();
+              closeTab(id);
+            },
+          },
+          "×",
+        ),
+      );
+      tab.setAttribute("aria-selected", String(id === active));
+      tab.dataset.tab = id;
+      return tab;
+    }),
+  );
 }
 
 const overflow = editor.createDecorationsCollection();
 /** Mark text past the screen width (one column is taken by the ":"), which wraps on the calculator. */
 function markOverflow() {
   const doc = activeDoc();
-  if (!doc || doc.language !== "tibasic") { overflow.clear(); return; }
+  if (!doc || doc.language !== "tibasic") {
+    overflow.clear();
+    return;
+  }
   const cols = screenCols();
   const marks: monaco.editor.IModelDeltaDecoration[] = [];
   doc.model.getLinesContent().forEach((text, i) => {
@@ -1281,7 +2335,10 @@ function markOverflow() {
     if (text.length - lead < cols) return;
     marks.push({
       range: new monaco.Range(i + 1, lead + cols, i + 1, text.length + 1),
-      options: { inlineClassName: "overflow", hoverMessage: { value: "Wraps onto a new row on the calculator." } },
+      options: {
+        inlineClassName: "overflow",
+        hoverMessage: { value: "Wraps onto a new row on the calculator." },
+      },
     });
   });
   overflow.set(marks);
@@ -1290,86 +2347,158 @@ function markOverflow() {
 /** Which docs (and inserts) the active tab uses, or null for file types without one. */
 function catalogLang(): DocLangId | null {
   // While the docs tab shows, the docs follow the file you came from.
-  const language = (active === DOCS_TAB && lastDocTab ? docs.get(lastDocTab) : activeDoc())?.language;
+  const language = (
+    active === DOCS_TAB && lastDocTab ? docs.get(lastDocTab) : activeDoc()
+  )?.language;
   if (!language || language === "tibasic") return "tibasic";
   if (language === "python") return "python";
   if (language === ASM_LANG) return "ez80";
   // The CE toolchain builds C++ too. A Makefile marks the whole folder as a C project.
-  if (language === "c" || language === "cpp" || project?.hasMakefile) return "c";
+  if (language === "c" || language === "cpp" || project?.hasMakefile)
+    return "c";
   return null;
 }
 
 /** What the Docs view lists depends on the toolchain of the active tab. */
-function catalogGroups(): { group: string; entries: { name: string; insert: string; hint: string; detail?: string }[] }[] {
+function catalogGroups(): {
+  group: string;
+  entries: { name: string; insert: string; hint: string; detail?: string }[];
+}[] {
   switch (catalogLang()) {
-    case "tibasic": return tiCatalog(getTarget());
-    case "python": return PY_CATALOG;
-    case "ez80": return ASM_CATALOG;
-    case "c": return C_CATALOG;
-    default: return [];
+    case "tibasic":
+      return tiCatalog(getTarget());
+    case "python":
+      return PY_CATALOG;
+    case "ez80":
+      return ASM_CATALOG;
+    case "c":
+      return C_CATALOG;
+    default:
+      return [];
   }
 }
 
 /** Opens the docs tab for the active tab's language, at the named entry if given. */
 function openDocs(name?: string) {
   const lang = catalogLang() ?? undefined;
-  openView({ id: DOCS_TAB, label: "Docs", hint: "Documentation for TI-BASIC, the C libraries, py2ez80 and eZ80 assembly (Ctrl+Shift+J)", el: docsEl });
+  openView({
+    id: DOCS_TAB,
+    label: "Docs",
+    hint: "Documentation for TI-BASIC, the C libraries, py2ez80 and eZ80 assembly (Ctrl+Shift+J)",
+    el: docsEl,
+  });
   docsView.open(lang, name);
 }
 
 /** The Docs view: every entry for the active tab's language. Click opens its page; Enter or + inserts it. */
 function renderDocList() {
   const lang = catalogLang();
-  els.docsLang.textContent = lang ? `· ${DOCS.find(d => d.id === lang)!.label}` : "";
+  els.docsLang.textContent = lang
+    ? `· ${DOCS.find((d) => d.id === lang)!.label}`
+    : "";
   const q = els.docFind.value.trim().toLowerCase();
   const groups = catalogGroups();
-  const nodes = groups.flatMap(group => {
-    const entries = group.entries.filter(e => !q || `${e.name} ${e.hint} ${e.detail ?? ""}`.toLowerCase().includes(q));
+  const nodes = groups.flatMap((group) => {
+    const entries = group.entries.filter(
+      (e) =>
+        !q || `${e.name} ${e.hint} ${e.detail ?? ""}`.toLowerCase().includes(q),
+    );
     if (!entries.length) return [];
     return [
       h("h3", { className: "section" }, group.group),
-      ...entries.map(e => {
+      ...entries.map((e) => {
         const hint = e.hint.replace(/`/g, "");
-        const row = h("div", { className: "item", tabIndex: 0, title: [e.detail, hint, "Click: full docs · Enter: insert"].filter(Boolean).join("\n"),
-          onclick: () => openDocs(e.name) },
-          h("code", {}, e.name), ...(hint ? [h("span", {}, hint)] : []),
-          h("button", { className: "insert", type: "button", title: "Insert at the cursor", tabIndex: -1,
-            onclick: (ev: Event) => { ev.stopPropagation(); insertSnippet(e.insert); } }, "+"));
+        const row = h(
+          "div",
+          {
+            className: "item",
+            tabIndex: 0,
+            title: [e.detail, hint, "Click: full docs · Enter: insert"]
+              .filter(Boolean)
+              .join("\n"),
+            onclick: () => openDocs(e.name),
+          },
+          h("code", {}, e.name),
+          ...(hint ? [h("span", {}, hint)] : []),
+          h(
+            "button",
+            {
+              className: "insert",
+              type: "button",
+              title: "Insert at the cursor",
+              tabIndex: -1,
+              onclick: (ev: Event) => {
+                ev.stopPropagation();
+                insertSnippet(e.insert);
+              },
+            },
+            "+",
+          ),
+        );
         row.dataset.insert = e.insert;
         return row;
       }),
     ];
   });
-  const none = groups.length ? "Nothing matches." : "No docs for this file type.";
-  els.docList.replaceChildren(...(nodes.length ? nodes : [h("p", { className: "hint" }, none)]));
+  const none = groups.length
+    ? "Nothing matches."
+    : "No docs for this file type.";
+  els.docList.replaceChildren(
+    ...(nodes.length ? nodes : [h("p", { className: "hint" }, none)]),
+  );
 }
 
 /** Inserts an entry at the cursor. Monaco snippet syntax ($0, ${1:…}) expands into tab stops. */
 function insertSnippet(text: string) {
-  if (!activeDoc()) { setMessage("Open a program to insert commands."); return; }
+  if (!activeDoc()) {
+    setMessage("Open a program to insert commands.");
+    return;
+  }
   editor.focus();
   // Standalone Monaco has no "editor.action.insertSnippet" command; the snippet controller is the way in.
-  editor.getContribution<monaco.editor.IEditorContribution & { insert(template: string): void }>("snippetController2")?.insert(text);
-  if (text.endsWith("(")) editor.trigger("docs","editor.action.triggerParameterHints", null);
+  editor
+    .getContribution<
+      monaco.editor.IEditorContribution & { insert(template: string): void }
+    >("snippetController2")
+    ?.insert(text);
+  if (text.endsWith("("))
+    editor.trigger("docs", "editor.action.triggerParameterHints", null);
 }
 
 /** Arrow keys walk the docs list; Up from the first item goes back to the search box. */
 function docListKeys(e: KeyboardEvent) {
-  if (e.key === "Escape") { e.preventDefault(); editor.focus(); return; }
+  if (e.key === "Escape") {
+    e.preventDefault();
+    editor.focus();
+    return;
+  }
   const items = [...els.docList.querySelectorAll<HTMLElement>(".item")];
   const nameOf = (i: HTMLElement) => i.querySelector("code")!.textContent!;
   // Best match, not first listed: "sin(" must pick sin( over asin(.
   const best = () => {
     const q = els.docFind.value.trim().toLowerCase();
-    const named = (test: (name: string) => boolean) => items.find(i => test(nameOf(i).toLowerCase()));
-    return named(n => n === q) ?? named(n => n.startsWith(q)) ?? items[0];
+    const named = (test: (name: string) => boolean) =>
+      items.find((i) => test(nameOf(i).toLowerCase()));
+    return named((n) => n === q) ?? named((n) => n.startsWith(q)) ?? items[0];
   };
-  const current = e.target === els.docFind ? best() : (e.target as HTMLElement).closest<HTMLElement>(".item");
-  if (e.key === "F1") { e.preventDefault(); if (current) openDocs(nameOf(current)); return; }
-  if (e.key === "Enter") { e.preventDefault(); if (current?.dataset.insert) insertSnippet(current.dataset.insert); return; }
+  const current =
+    e.target === els.docFind
+      ? best()
+      : (e.target as HTMLElement).closest<HTMLElement>(".item");
+  if (e.key === "F1") {
+    e.preventDefault();
+    if (current) openDocs(nameOf(current));
+    return;
+  }
+  if (e.key === "Enter") {
+    e.preventDefault();
+    if (current?.dataset.insert) insertSnippet(current.dataset.insert);
+    return;
+  }
   if (e.key !== "ArrowDown" && e.key !== "ArrowUp") return;
   e.preventDefault();
-  const next = items.indexOf(e.target as HTMLElement) + (e.key === "ArrowDown" ? 1 : -1);
+  const next =
+    items.indexOf(e.target as HTMLElement) + (e.key === "ArrowDown" ? 1 : -1);
   if (next < 0) els.docFind.focus();
   else items[Math.min(next, items.length - 1)]?.focus();
 }
@@ -1394,25 +2523,31 @@ function showPane(which: Pane, toggle = false) {
 function applyEditorMode() {
   const basic = isBasic();
   editor.updateOptions({
-    ...(basic ? gutterOptions() : { lineNumbers: "on" as const, lineNumbersMinChars: 3 }),
+    ...(basic
+      ? gutterOptions()
+      : { lineNumbers: "on" as const, lineNumbersMinChars: 3 }),
     rulers: basic && settings().showRuler ? [screenCols() - 1] : [],
     wordBasedSuggestions: basic ? "off" : "currentDocument",
     suggest: { showWords: !basic, snippetsPreventQuickSuggestions: false },
   });
   els.gutter.hidden = !basic;
-  els.gutter.textContent = showNumbers ? "Gutter: line numbers" : "Gutter: \":\"";
+  els.gutter.textContent = showNumbers ? "Gutter: line numbers" : 'Gutter: ":"';
   els.gutter.setAttribute("aria-pressed", String(showNumbers));
   els.target.hidden = !basic;
   els.target.textContent = `Target: ${TARGETS[getTarget()].label}`;
-  const make = usesMake(), asm = assemblesActive();
-  els.exportBtn.hidden = !make && !asm && (!basic || !activeDoc());
+  const make = usesMake(),
+    asm = assemblesActive(),
+    script = nspireScript();
+  els.exportBtn.hidden = !make && !asm && !script && (!basic || !activeDoc());
   els.run.hidden = !fs.available || els.exportBtn.hidden;
-  els.exportBtn.textContent = asm ? "Assemble .8xp" : make ? "Build" : "Build .8xp";
+  els.exportBtn.textContent = asm ? "Assemble .8xp" : buildLabel();
   els.exportBtn.title = asm
     ? "Assembles this file with spasm-ng into an .8xp next to it (Ctrl+E). F5 also sends it to the calculator."
     : make
-    ? `Runs make in ${project?.name} (Ctrl+E). Saves changed files first.`
-    : "Ctrl+E rebuilds to the same file. Ctrl+Shift+E picks a new location.";
+      ? `Runs make in ${project?.name} (Ctrl+E). Saves changed files first.`
+      : script
+        ? "Packs the script with Luna into a .tns (Ctrl+E). Ctrl+Shift+E picks a new location."
+        : "Ctrl+E rebuilds to the same file. Ctrl+Shift+E picks a new location.";
   renderDocList(); // the docs follow the toolchain of the active tab
   renderProject(); // so does the status bar
 }
@@ -1420,28 +2555,53 @@ function applyEditorMode() {
 function renderProblems() {
   const doc = activeDoc();
   // Only TI-BASIC and Python (py2ez80) have diagnostics; "No problems" for C would be a claim nothing is checking.
-  els.problems.hidden = !doc || (doc.language !== "tibasic" && doc.language !== "python"); // ← CHANGED
+  els.problems.hidden =
+    !doc || (doc.language !== "tibasic" && doc.language !== "python"); // ← CHANGED
   if (els.problems.hidden || !doc) return;
   const markers = monaco.editor.getModelMarkers({ resource: doc.model.uri });
-  const errors = markers.filter(m => m.severity === monaco.MarkerSeverity.Error).length;
-  const warnings = markers.filter(m => m.severity === monaco.MarkerSeverity.Warning).length;
-  const plural = (n: number, word: string) => `${n} ${word}${n === 1 ? "" : "s"}`;
-  els.problems.textContent = errors || warnings
-    ? [errors && plural(errors, "error"), warnings && plural(warnings, "warning")].filter(Boolean).join(", ")
-    : "No problems";
-  els.problems.className = errors ? "has-errors" : warnings ? "has-warnings" : "";
+  const errors = markers.filter(
+    (m) => m.severity === monaco.MarkerSeverity.Error,
+  ).length;
+  const warnings = markers.filter(
+    (m) => m.severity === monaco.MarkerSeverity.Warning,
+  ).length;
+  const plural = (n: number, word: string) =>
+    `${n} ${word}${n === 1 ? "" : "s"}`;
+  els.problems.textContent =
+    errors || warnings
+      ? [
+          errors && plural(errors, "error"),
+          warnings && plural(warnings, "warning"),
+        ]
+          .filter(Boolean)
+          .join(", ")
+      : "No problems";
+  els.problems.className = errors
+    ? "has-errors"
+    : warnings
+      ? "has-warnings"
+      : "";
 }
 
 const statusBar = document.querySelector<HTMLElement>(".status")!;
-const KIND_LABEL: Record<DocLangId, string> = { tibasic: "TI-BASIC", c: "C", python: "py2ez80", ez80: "eZ80 assembly" };
+const KIND_LABEL: Record<DocLangId, string> = {
+  tibasic: "TI-BASIC",
+  c: "C",
+  python: "py2ez80",
+  ez80: "eZ80 assembly",
+};
 
 /** The status bar takes the color of the active toolchain and names the project on its left, as VS Code does. */
 function renderProject() {
   const kind = catalogLang();
   statusBar.dataset.kind = kind ?? "plain";
-  const where = project ? `${project.hasMakefile ? "C project" : "Folder"}: ${project.name}` : "Programs";
+  const where = project
+    ? `${project.hasMakefile ? "C project" : "Folder"}: ${project.name}`
+    : "Programs";
   els.project.textContent = kind ? `${where} · ${KIND_LABEL[kind]}` : where;
-  els.project.title = project ? project.root : "TI-BASIC programs stored by TIde";
+  els.project.title = project
+    ? project.root
+    : "TI-BASIC programs stored by TIde";
 }
 
 /** The encoding picker in the status bar, for project files: reopen in, or save as, another encoding. */
@@ -1451,14 +2611,20 @@ function renderEncoding(doc: Doc | undefined) {
   const key = encodingKey(doc.encoding);
   if (els.encoding.dataset.for !== `${doc.id}|${key}`) {
     els.encoding.dataset.for = `${doc.id}|${key}`;
-    const option = (action: string, e: Encoding) => h("option", { value: `${action}:${encodingKey(e)}` }, e.label);
+    const option = (action: string, e: Encoding) =>
+      h("option", { value: `${action}:${encodingKey(e)}` }, e.label);
     els.encoding.replaceChildren(
       h("option", { value: "", hidden: true }, doc.encoding.label),
-      Object.assign(document.createElement("optgroup"), { label: "Reopen with encoding" }),
-      Object.assign(document.createElement("optgroup"), { label: "Save with encoding" }));
+      Object.assign(document.createElement("optgroup"), {
+        label: "Reopen with encoding",
+      }),
+      Object.assign(document.createElement("optgroup"), {
+        label: "Save with encoding",
+      }),
+    );
     const [, reopen, save] = els.encoding.children;
-    reopen.append(...ENCODINGS.map(e => option("reopen", e)));
-    save.append(...ENCODINGS.filter(canSave).map(e => option("save", e)));
+    reopen.append(...ENCODINGS.map((e) => option("reopen", e)));
+    save.append(...ENCODINGS.filter(canSave).map((e) => option("save", e)));
   }
   els.encoding.value = "";
   els.encoding.title = `${doc.encoding.label}. Pick an encoding to reopen or save this file in.`;
@@ -1468,9 +2634,14 @@ function renderStatus() {
   renderProject();
   const doc = activeDoc();
   const pos = editor.getPosition();
-  els.pos.textContent = doc && pos ? `Ln ${pos.lineNumber}, Col ${pos.column}` : "";
+  els.pos.textContent =
+    doc && pos ? `Ln ${pos.lineNumber}, Col ${pos.column}` : "";
   renderEncoding(doc);
-  if (!doc) { els.size.textContent = ""; els.size.title = ""; return; }
+  if (!doc) {
+    els.size.textContent = "";
+    els.size.title = "";
+    return;
+  }
   const source = doc.model.getValue();
   if (doc.language === "tibasic") {
     // Real tokenized size: what the calculator will store, not an estimate.
@@ -1496,15 +2667,23 @@ function refresh() {
 // ── Right-click menus ──────────────────────────────────────────────────────
 
 const copy = (text: string, what: string) =>
-  navigator.clipboard.writeText(text).then(() => setMessage(`Copied ${what}`), () => setMessage("Couldn't copy to the clipboard."));
+  navigator.clipboard.writeText(text).then(
+    () => setMessage(`Copied ${what}`),
+    () => setMessage("Couldn't copy to the clipboard."),
+  );
 
 function closeOthers(keep: string, toRight = false) {
   const from = tabOrder.indexOf(keep);
-  for (const id of [...tabOrder]) if (id !== keep && (!toRight || tabOrder.indexOf(id) > from)) closeTab(id);
+  for (const id of [...tabOrder])
+    if (id !== keep && (!toRight || tabOrder.indexOf(id) > from)) closeTab(id);
 }
 
 async function sendPath(path: string, name: string) {
-  try { await calc.send([{ name, bytes: await fs.readBinary(path) }]); } catch (err) { setMessage(`Could not send ${name}: ${err}`); }
+  try {
+    await calc.send([{ name, bytes: await fs.readBinary(path) }]);
+  } catch (err) {
+    setMessage(`Could not send ${name}: ${err}`);
+  }
 }
 
 // ── Creating files and folders in the tree ──
@@ -1514,7 +2693,11 @@ async function sendPath(path: string, name: string) {
 /** The folder the header's New file and New folder buttons create in: the last folder clicked, or the one holding the last file clicked. */
 let targetDir: string | null = null;
 /** The name box being shown, if any. */
-let creating: { dir: string; kind: "file" | "folder"; row?: HTMLElement } | null = null;
+let creating: {
+  dir: string;
+  kind: "file" | "folder";
+  row?: HTMLElement;
+} | null = null;
 
 const parentOf = (path: string) => path.replace(/[\\/][^\\/]*$/, "");
 
@@ -1524,7 +2707,8 @@ async function createIn(dir: string, kind: "file" | "folder") {
   showPane("files");
   if (dir !== project.root && !expanded.has(dir)) {
     expanded.add(dir);
-    if (!dirCache.has(dir)) dirCache.set(dir, await fs.readDir(dir).catch(() => [] as Entry[]));
+    if (!dirCache.has(dir))
+      dirCache.set(dir, await fs.readDir(dir).catch(() => [] as Entry[]));
   }
   creating = { dir, kind };
   renderTree();
@@ -1537,29 +2721,52 @@ async function createIn(dir: string, kind: "file" | "folder") {
 function nameProblem(dir: string, name: string): string | null {
   if (!name) return null;
   const parts = name.split(/[\\/]/);
-  if (parts.some(p => !p.trim())) return "A name can't start or end with a slash, or have two in a row.";
-  if (parts.some(p => /[:*?"<>|]/.test(p))) return 'A name can\'t contain : * ? " < > |';
-  if (parts.some(p => p === "." || p === "..")) return "A name can't be . or ..";
-  if (parts.some(p => /[. ]$/.test(p))) return "A name can't end with a dot or a space.";
+  if (parts.some((p) => !p.trim()))
+    return "A name can't start or end with a slash, or have two in a row.";
+  if (parts.some((p) => /[:*?"<>|]/.test(p)))
+    return "A name can't contain : * ? \" < > |";
+  if (parts.some((p) => p === "." || p === ".."))
+    return "A name can't be . or ..";
+  if (parts.some((p) => /[. ]$/.test(p)))
+    return "A name can't end with a dot or a space.";
   const first = parts[0].toLowerCase();
-  const clash = (dirCache.get(dir) ?? []).find(e => e.name.toLowerCase() === first);
-  if (clash && (parts.length === 1 || !clash.isDir)) return `${parts.length === 1 ? name : parts[0]} already exists here. Choose a different name.`;
+  const clash = (dirCache.get(dir) ?? []).find(
+    (e) => e.name.toLowerCase() === first,
+  );
+  if (clash && (parts.length === 1 || !clash.isDir))
+    return `${parts.length === 1 ? name : parts[0]} already exists here. Choose a different name.`;
   return null;
 }
 
 /** The name box row in the tree. */
-function nameBoxRow(dir: string, kind: "file" | "folder", depth: number): HTMLElement {
-  const input = h("input", { className: "name-input", spellcheck: false, ariaLabel: `New ${kind} name` });
+function nameBoxRow(
+  dir: string,
+  kind: "file" | "folder",
+  depth: number,
+): HTMLElement {
+  const input = h("input", {
+    className: "name-input",
+    spellcheck: false,
+    ariaLabel: `New ${kind} name`,
+  });
   const problem = h("div", { className: "name-problem", hidden: true });
-  const row = h("li", { className: "creating" },
-    h("span", { className: "twisty" }, kind === "folder" ? "▸" : ""), input, problem);
+  const row = h(
+    "li",
+    { className: "creating" },
+    h("span", { className: "twisty" }, kind === "folder" ? "▸" : ""),
+    input,
+    problem,
+  );
   row.style.paddingLeft = `${10 + depth * 14}px`;
   row.style.setProperty("--depth", String(depth));
   let done = false;
   const finish = async (commit: boolean) => {
     if (done) return;
     const name = input.value.trim();
-    if (commit && name && nameProblem(dir, name)) { input.focus(); return; }
+    if (commit && name && nameProblem(dir, name)) {
+      input.focus();
+      return;
+    }
     done = true;
     creating = null;
     if (!commit || !name) return renderTree();
@@ -1569,7 +2776,9 @@ function nameBoxRow(dir: string, kind: "file" | "folder", depth: number): HTMLEl
       else await fs.writeFile(path, "");
       // Refresh and open every folder on the way, so the new item shows.
       let at = dir;
-      for (const part of name.split(/[\\/]/).slice(0, kind === "folder" ? undefined : -1)) {
+      for (const part of name
+        .split(/[\\/]/)
+        .slice(0, kind === "folder" ? undefined : -1)) {
         dirCache.set(at, await fs.readDir(at));
         at = joinPath(at, part);
         expanded.add(at);
@@ -1577,7 +2786,8 @@ function nameBoxRow(dir: string, kind: "file" | "folder", depth: number): HTMLEl
       dirCache.set(at, await fs.readDir(at).catch(() => [] as Entry[]));
       if (kind === "folder") targetDir = path;
       renderTree();
-      if (kind === "file") await openFile({ name: baseName(path), path, isDir: false });
+      if (kind === "file")
+        await openFile({ name: baseName(path), path, isDir: false });
       else setMessage(`Created ${name}`);
     } catch (err) {
       renderTree();
@@ -1590,22 +2800,30 @@ function nameBoxRow(dir: string, kind: "file" | "folder", depth: number): HTMLEl
     problem.textContent = why ?? "";
     row.classList.toggle("invalid", !!why);
   });
-  input.addEventListener("keydown", e => {
+  input.addEventListener("keydown", (e) => {
     e.stopPropagation();
-    if (e.key === "Enter") { e.preventDefault(); void finish(true); }
-    else if (e.key === "Escape") { e.preventDefault(); void finish(false); }
+    if (e.key === "Enter") {
+      e.preventDefault();
+      void finish(true);
+    } else if (e.key === "Escape") {
+      e.preventDefault();
+      void finish(false);
+    }
   });
   // Clicking away creates it if the name is good, and drops it otherwise.
-  input.addEventListener("blur", () => window.setTimeout(() => {
-    if (document.activeElement === input) return; // the tree was only redrawn
-    void finish(!nameProblem(dir, input.value.trim()));
-  }));
+  input.addEventListener("blur", () =>
+    window.setTimeout(() => {
+      if (document.activeElement === input) return; // the tree was only redrawn
+      void finish(!nameProblem(dir, input.value.trim()));
+    }),
+  );
   return row;
 }
 
 /** Deletes a file or folder from the Explorer: to the Recycle Bin, or permanently. Closes its tabs. */
 async function deleteEntry(path: string, isDir: boolean, permanent: boolean) {
-  const name = baseName(path), what = isDir ? `the folder ${name} and everything in it` : name;
+  const name = baseName(path),
+    what = isDir ? `the folder ${name} and everything in it` : name;
   const bin = navigator.userAgent.includes("Mac") ? "Trash" : "Recycle Bin";
   const ok = permanent
     ? confirm(`Permanently delete ${what}?
@@ -1618,7 +2836,10 @@ You can restore it from there.`);
   // Unsaved changes in files being deleted are lost with them.
   const inside = (id: string) => {
     const p = docs.get(id)?.hint ?? views.get(id)?.hint;
-    return !!p && (p === path || p.startsWith(path + "\\") || p.startsWith(path + "/"));
+    return (
+      !!p &&
+      (p === path || p.startsWith(path + "\\") || p.startsWith(path + "/"))
+    );
   };
   try {
     await fs.deletePath(path, permanent);
@@ -1632,7 +2853,8 @@ You can restore it from there.`);
   }
   const parent = parentOf(path);
   dirCache.set(parent, await fs.readDir(parent).catch(() => [] as Entry[]));
-  for (const key of [...dirCache.keys()]) if (key.startsWith(path)) dirCache.delete(key);
+  for (const key of [...dirCache.keys()])
+    if (key.startsWith(path)) dirCache.delete(key);
   if (targetDir?.startsWith(path)) targetDir = parent;
   renderTree();
   void scm.refresh();
@@ -1647,19 +2869,27 @@ You can restore it from there.`);
 /** Paths of files dropped from outside TIde, which have no place on disk TIde knows. */
 const DROPPED = "dropped:";
 let droppedCount = 0;
-const isInside = (path: string, dir: string) => path === dir || path.startsWith(dir + "\\") || path.startsWith(dir + "/");
+const isInside = (path: string, dir: string) =>
+  path === dir || path.startsWith(dir + "\\") || path.startsWith(dir + "/");
 
 /** The folder a drop on `target` goes into, or null where nothing can be dropped. */
 function dropFolder(target: EventTarget | null): string | null {
   if (!project || !(target instanceof Element)) return null;
   const row = target.closest<HTMLElement>("#tree [data-path]");
-  if (row) return row.dataset.dir === "true" ? row.dataset.path! : parentOf(row.dataset.path!);
-  return target.closest(".files") && !target.closest("#list, #list-empty, .files > .section:first-child") ? project.root : null;
+  if (row)
+    return row.dataset.dir === "true"
+      ? row.dataset.path!
+      : parentOf(row.dataset.path!);
+  return target.closest(".files") &&
+    !target.closest("#list, #list-empty, .files > .section:first-child")
+    ? project.root
+    : null;
 }
 
 /** Shows which folder a drop goes into: its row, and the rows inside it. */
 function markDropFolder(dir: string | null) {
-  for (const row of els.tree.querySelectorAll<HTMLElement>(".drop-into")) row.classList.remove("drop-into");
+  for (const row of els.tree.querySelectorAll<HTMLElement>(".drop-into"))
+    row.classList.remove("drop-into");
   els.tree.classList.toggle("drop-root", !!project && dir === project.root);
   if (!dir || dir === project?.root) return;
   for (const row of els.tree.querySelectorAll<HTMLElement>("[data-path]")) {
@@ -1669,61 +2899,113 @@ function markDropFolder(dir: string | null) {
 
 /** Moves files and folders into `dir`, keeping their tabs open on the new paths. */
 async function moveInto(paths: string[], dir: string) {
-  const moving = paths.filter(p => parentOf(p) !== dir && !isInside(dir, p));
+  const moving = paths.filter((p) => parentOf(p) !== dir && !isInside(dir, p));
   if (!moving.length) return;
-  const tabsIn = (p: string) => tabOrder.filter(id => { const at = docs.get(id)?.hint ?? views.get(id)?.hint; return !!at && id.startsWith("file:") && isInside(at, p); });
-  const unsaved = moving.flatMap(tabsIn).map(id => docs.get(id)).filter((d): d is Doc => !!d && isDirty(d));
-  if (unsaved.length) { setMessage(`Save ${unsaved.map(d => d.label).join(", ")} before moving ${unsaved.length === 1 ? "it" : "them"}.`); return; }
+  const tabsIn = (p: string) =>
+    tabOrder.filter((id) => {
+      const at = docs.get(id)?.hint ?? views.get(id)?.hint;
+      return !!at && id.startsWith("file:") && isInside(at, p);
+    });
+  const unsaved = moving
+    .flatMap(tabsIn)
+    .map((id) => docs.get(id))
+    .filter((d): d is Doc => !!d && isDirty(d));
+  if (unsaved.length) {
+    setMessage(
+      `Save ${unsaved.map((d) => d.label).join(", ")} before moving ${unsaved.length === 1 ? "it" : "them"}.`,
+    );
+    return;
+  }
   const moved: string[] = [];
   for (const from of moving) {
     const to = joinPath(dir, baseName(from));
     try {
       await fs.movePath(from, to);
     } catch (err) {
-      setMessage(`Could not move ${baseName(from)}: ${err instanceof Error ? err.message : err}`);
+      setMessage(
+        `Could not move ${baseName(from)}: ${err instanceof Error ? err.message : err}`,
+      );
       continue;
     }
     moved.push(from);
     // Its tabs open again from where it is now, in the same places, and the tab that was showing stays showing.
     let showing = active;
     for (const id of tabsIn(from)) {
-      const now = to + id.slice(5).slice(from.length), nowId = fileId(now);
+      const now = to + id.slice(5).slice(from.length),
+        nowId = fileId(now);
       const at = tabOrder.indexOf(id);
       closeTab(id);
       await openFile({ name: baseName(now), path: now, isDir: false });
-      tabOrder = tabOrder.filter(t => t !== nowId);
+      tabOrder = tabOrder.filter((t) => t !== nowId);
       tabOrder.splice(at, 0, nowId);
       if (showing === id) showing = nowId;
     }
-    if (showing && showing !== active && (docs.has(showing) || views.has(showing))) activate(showing);
-    if (targetDir && isInside(targetDir, from)) targetDir = to + targetDir.slice(from.length);
-    for (const key of [...dirCache.keys()]) if (isInside(key, from)) dirCache.delete(key);
-    for (const key of [...expanded]) if (isInside(key, from)) { expanded.delete(key); expanded.add(to + key.slice(from.length)); }
+    if (
+      showing &&
+      showing !== active &&
+      (docs.has(showing) || views.has(showing))
+    )
+      activate(showing);
+    if (targetDir && isInside(targetDir, from))
+      targetDir = to + targetDir.slice(from.length);
+    for (const key of [...dirCache.keys()])
+      if (isInside(key, from)) dirCache.delete(key);
+    for (const key of [...expanded])
+      if (isInside(key, from)) {
+        expanded.delete(key);
+        expanded.add(to + key.slice(from.length));
+      }
   }
   if (!moved.length) return;
-  for (const folder of new Set([dir, ...moved.map(parentOf)])) dirCache.set(folder, await fs.readDir(folder).catch(() => [] as Entry[]));
+  for (const folder of new Set([dir, ...moved.map(parentOf)]))
+    dirCache.set(folder, await fs.readDir(folder).catch(() => [] as Entry[]));
   if (dir !== project?.root) expanded.add(dir);
   renderTree();
   refresh();
   void scm.refresh();
-  setMessage(`Moved ${moved.length === 1 ? baseName(moved[0]) : `${moved.length} items`} to ${baseName(dir)}`);
+  setMessage(
+    `Moved ${moved.length === 1 ? baseName(moved[0]) : `${moved.length} items`} to ${baseName(dir)}`,
+  );
 }
 
 /** Everything in a drop from outside: files, and folders with what's in them, by path inside the drop. */
-async function droppedFiles(data: DataTransfer): Promise<{ path: string; file: File | null }[]> {
-  type FsEntry = { isFile: boolean; isDirectory: boolean; name: string; file?(ok: (f: File) => void, fail: (e: unknown) => void): void;
-    createReader?(): { readEntries(ok: (e: FsEntry[]) => void, fail: (e: unknown) => void): void } };
-  const entries = [...data.items].map(i => (i as DataTransferItem & { webkitGetAsEntry?(): FsEntry | null }).webkitGetAsEntry?.() ?? null);
-  if (!entries.some(Boolean)) return [...data.files].map(file => ({ path: file.name, file }));
+async function droppedFiles(
+  data: DataTransfer,
+): Promise<{ path: string; file: File | null }[]> {
+  type FsEntry = {
+    isFile: boolean;
+    isDirectory: boolean;
+    name: string;
+    file?(ok: (f: File) => void, fail: (e: unknown) => void): void;
+    createReader?(): {
+      readEntries(ok: (e: FsEntry[]) => void, fail: (e: unknown) => void): void;
+    };
+  };
+  const entries = [...data.items].map(
+    (i) =>
+      (
+        i as DataTransferItem & { webkitGetAsEntry?(): FsEntry | null }
+      ).webkitGetAsEntry?.() ?? null,
+  );
+  if (!entries.some(Boolean))
+    return [...data.files].map((file) => ({ path: file.name, file }));
   const out: { path: string; file: File | null }[] = [];
   const walk = async (entry: FsEntry, at: string): Promise<void> => {
     const path = at ? `${at}/${entry.name}` : entry.name;
-    if (entry.isFile) { out.push({ path, file: await new Promise<File>((ok, fail) => entry.file!(ok, fail)) }); return; }
+    if (entry.isFile) {
+      out.push({
+        path,
+        file: await new Promise<File>((ok, fail) => entry.file!(ok, fail)),
+      });
+      return;
+    }
     out.push({ path, file: null });
     const reader = entry.createReader!();
     // Readers hand out a folder's entries a batch at a time, then an empty batch.
     for (;;) {
-      const batch = await new Promise<FsEntry[]>((ok, fail) => reader.readEntries(ok, fail));
+      const batch = await new Promise<FsEntry[]>((ok, fail) =>
+        reader.readEntries(ok, fail),
+      );
       if (!batch.length) break;
       for (const child of batch) await walk(child, path);
     }
@@ -1736,43 +3018,72 @@ async function droppedFiles(data: DataTransfer): Promise<{ path: string; file: F
 async function copyInto(data: DataTransfer, dir: string) {
   const items = await droppedFiles(data);
   if (!items.length) return;
-  const tops = [...new Set(items.map(i => i.path.split("/")[0]))];
-  const clash = tops.filter(name => (dirCache.get(dir) ?? []).some(e => e.name.toLowerCase() === name.toLowerCase()));
-  if (clash.length && !confirm(`${clash.join(", ")} already ${clash.length === 1 ? "exists" : "exist"} in ${baseName(dir)}. Replace ${clash.length === 1 ? "it" : "them"}?`)) return;
+  const tops = [...new Set(items.map((i) => i.path.split("/")[0]))];
+  const clash = tops.filter((name) =>
+    (dirCache.get(dir) ?? []).some(
+      (e) => e.name.toLowerCase() === name.toLowerCase(),
+    ),
+  );
+  if (
+    clash.length &&
+    !confirm(
+      `${clash.join(", ")} already ${clash.length === 1 ? "exists" : "exist"} in ${baseName(dir)}. Replace ${clash.length === 1 ? "it" : "them"}?`,
+    )
+  )
+    return;
   try {
     for (const item of items) {
       const to = joinPath(dir, item.path);
-      if (item.file) await fs.writeBinary(to, new Uint8Array(await item.file.arrayBuffer()));
+      if (item.file)
+        await fs.writeBinary(to, new Uint8Array(await item.file.arrayBuffer()));
       else await fs.createDir(to);
     }
   } catch (err) {
-    setMessage(`Could not copy everything in: ${err instanceof Error ? err.message : err}`);
+    setMessage(
+      `Could not copy everything in: ${err instanceof Error ? err.message : err}`,
+    );
   }
-  for (const key of [...dirCache.keys()]) if (isInside(key, dir)) dirCache.set(key, await fs.readDir(key).catch(() => [] as Entry[]));
+  for (const key of [...dirCache.keys()])
+    if (isInside(key, dir))
+      dirCache.set(key, await fs.readDir(key).catch(() => [] as Entry[]));
   if (dir !== project?.root) expanded.add(dir);
   renderTree();
   void scm.refresh();
-  setMessage(`Copied ${tops.length === 1 ? tops[0] : `${tops.length} items`} into ${baseName(dir)}`);
+  setMessage(
+    `Copied ${tops.length === 1 ? tops[0] : `${tops.length} items`} into ${baseName(dir)}`,
+  );
 }
 
 /** Opens a file dropped from outside TIde in a tab. Saving it asks where. */
 async function openDropped(file: File) {
   const bytes = new Uint8Array(await file.arrayBuffer());
-  const entry: Entry = { name: file.name, path: `${DROPPED}${++droppedCount}/${file.name}`, isDir: false };
-  if (SEND_TYPES.includes(extOf(file.name))) return openView(await tiFileView(entry, bytes));
-  const found = detect(bytes, encodingByKey(settings().fallbackEncoding) ?? ENCODINGS[4]);
+  const entry: Entry = {
+    name: file.name,
+    path: `${DROPPED}${++droppedCount}/${file.name}`,
+    isDir: false,
+  };
+  if (SEND_TYPES.includes(extOf(file.name)))
+    return openView(await tiFileView(entry, bytes));
+  const found = detect(
+    bytes,
+    encodingByKey(settings().fallbackEncoding) ?? ENCODINGS[4],
+  );
   if (!found) return openView(unsupportedView(entry, bytes));
   openText(entry, found.text, found.encoding);
 }
 
 function setUpDragging() {
   const files = document.querySelector<HTMLElement>("#pane-files .files")!;
-  const fromTree = (e: DragEvent) => e.dataTransfer?.types.includes(TREE_DRAG) ?? false;
-  const fromOutside = (e: DragEvent) => !fromTree(e) && (e.dataTransfer?.types.includes("Files") ?? false);
+  const fromTree = (e: DragEvent) =>
+    e.dataTransfer?.types.includes(TREE_DRAG) ?? false;
+  const fromOutside = (e: DragEvent) =>
+    !fromTree(e) && (e.dataTransfer?.types.includes("Files") ?? false);
   let dragged: string[] = [];
 
-  files.addEventListener("dragstart", e => {
-    const row = (e.target as HTMLElement).closest<HTMLElement>("#tree [data-path]");
+  files.addEventListener("dragstart", (e) => {
+    const row = (e.target as HTMLElement).closest<HTMLElement>(
+      "#tree [data-path]",
+    );
     if (!row || !e.dataTransfer) return;
     dragged = [row.dataset.path!];
     e.dataTransfer.setData(TREE_DRAG, dragged.join("\n"));
@@ -1783,116 +3094,225 @@ function setUpDragging() {
   files.addEventListener("dragend", () => {
     dragged = [];
     markDropFolder(null);
-    for (const row of els.tree.querySelectorAll(".dragging")) row.classList.remove("dragging");
+    for (const row of els.tree.querySelectorAll(".dragging"))
+      row.classList.remove("dragging");
   });
   // Hovering a closed folder for a moment opens it, so a drag can go deeper.
   let hover: { dir: string; timer: number } | null = null;
-  files.addEventListener("dragover", e => {
+  files.addEventListener("dragover", (e) => {
     if (!fromTree(e) && !fromOutside(e)) return;
     const dir = dropFolder(e.target);
-    const ok = !!dir && (fromOutside(e) || !dragged.some(p => isInside(dir, p) || parentOf(p) === dir));
+    const ok =
+      !!dir &&
+      (fromOutside(e) ||
+        !dragged.some((p) => isInside(dir, p) || parentOf(p) === dir));
     markDropFolder(ok ? dir : null);
     if (!ok) return;
     e.preventDefault();
     e.dataTransfer!.dropEffect = fromTree(e) ? "move" : "copy";
-    const row = (e.target as HTMLElement).closest<HTMLElement>("#tree [data-path]");
-    const closed = row?.dataset.dir === "true" && !expanded.has(row.dataset.path!) ? row.dataset.path! : null;
+    const row = (e.target as HTMLElement).closest<HTMLElement>(
+      "#tree [data-path]",
+    );
+    const closed =
+      row?.dataset.dir === "true" && !expanded.has(row.dataset.path!)
+        ? row.dataset.path!
+        : null;
     if (hover?.dir !== closed) {
       if (hover) window.clearTimeout(hover.timer);
-      hover = closed ? { dir: closed, timer: window.setTimeout(() => void toggleDir({ name: baseName(closed), path: closed, isDir: true }), 700) } : null;
+      hover = closed
+        ? {
+            dir: closed,
+            timer: window.setTimeout(
+              () =>
+                void toggleDir({
+                  name: baseName(closed),
+                  path: closed,
+                  isDir: true,
+                }),
+              700,
+            ),
+          }
+        : null;
     }
   });
-  files.addEventListener("dragleave", e => {
+  files.addEventListener("dragleave", (e) => {
     if (files.contains(e.relatedTarget as Node | null)) return;
     markDropFolder(null);
-    if (hover) { window.clearTimeout(hover.timer); hover = null; }
+    if (hover) {
+      window.clearTimeout(hover.timer);
+      hover = null;
+    }
   });
-  files.addEventListener("drop", e => {
+  files.addEventListener("drop", (e) => {
     const dir = dropFolder(e.target);
     markDropFolder(null);
-    if (hover) { window.clearTimeout(hover.timer); hover = null; }
+    if (hover) {
+      window.clearTimeout(hover.timer);
+      hover = null;
+    }
     if (!dir || !e.dataTransfer) return;
     e.preventDefault();
     e.stopPropagation();
-    if (fromTree(e)) void moveInto(e.dataTransfer.getData(TREE_DRAG).split("\n").filter(Boolean), dir);
+    if (fromTree(e))
+      void moveInto(
+        e.dataTransfer.getData(TREE_DRAG).split("\n").filter(Boolean),
+        dir,
+      );
     else if (fromOutside(e)) void copyInto(e.dataTransfer, dir);
   });
 
   // The editor opens what's dropped on it.
   const stage = document.querySelector<HTMLElement>(".stage")!;
-  stage.addEventListener("dragover", e => {
+  stage.addEventListener("dragover", (e) => {
     if (!fromTree(e) && !fromOutside(e)) return;
     e.preventDefault();
     e.dataTransfer!.dropEffect = fromTree(e) ? "link" : "copy";
     stage.classList.add("drop-open");
   });
-  stage.addEventListener("dragleave", e => { if (!stage.contains(e.relatedTarget as Node | null)) stage.classList.remove("drop-open"); });
-  stage.addEventListener("drop", e => {
+  stage.addEventListener("dragleave", (e) => {
+    if (!stage.contains(e.relatedTarget as Node | null))
+      stage.classList.remove("drop-open");
+  });
+  stage.addEventListener("drop", (e) => {
     stage.classList.remove("drop-open");
     if (!e.dataTransfer) return;
     e.preventDefault();
     if (fromTree(e)) {
-      for (const path of e.dataTransfer.getData(TREE_DRAG).split("\n").filter(Boolean)) {
-        const entry = [...dirCache.values()].flat().find(x => x.path === path);
+      for (const path of e.dataTransfer
+        .getData(TREE_DRAG)
+        .split("\n")
+        .filter(Boolean)) {
+        const entry = [...dirCache.values()]
+          .flat()
+          .find((x) => x.path === path);
         if (entry?.isDir) void toggleDir(entry);
         else void openFile({ name: baseName(path), path, isDir: false });
       }
     } else {
-      for (const file of [...e.dataTransfer.files].filter(f => !/\.tideex$/i.test(f.name))) {
-        void openDropped(file).catch(err => setMessage(`Can't open ${file.name}: ${err}`));
+      for (const file of [...e.dataTransfer.files].filter(
+        (f) => !/\.tideex$/i.test(f.name),
+      )) {
+        void openDropped(file).catch((err) =>
+          setMessage(`Can't open ${file.name}: ${err}`),
+        );
       }
     }
   });
   stage.addEventListener("dragend", () => stage.classList.remove("drop-open"));
-  document.addEventListener("dragend", () => stage.classList.remove("drop-open"));
+  document.addEventListener("dragend", () =>
+    stage.classList.remove("drop-open"),
+  );
 
   // Files dropped anywhere else must not replace the page with themselves.
-  window.addEventListener("dragover", e => { if (fromOutside(e)) e.preventDefault(); });
-  window.addEventListener("drop", e => {
-    if (!e.dataTransfer?.files.length) return;
-    e.preventDefault();
-    // .TIdeex files install wherever they're dropped, except into the Explorer, which copies them.
-    if (fs.desktop && !(e.target instanceof Element && e.target.closest("#pane-files .files"))) {
-      for (const file of [...e.dataTransfer.files].filter(f => /\.tideex$/i.test(f.name))) {
-        void file.arrayBuffer().then(b => extensionsView.install({ name: file.name, bytes: new Uint8Array(b) }));
+  window.addEventListener("dragover", (e) => {
+    if (fromOutside(e)) e.preventDefault();
+  });
+  window.addEventListener(
+    "drop",
+    (e) => {
+      if (!e.dataTransfer?.files.length) return;
+      e.preventDefault();
+      // .TIdeex files install wherever they're dropped, except into the Explorer, which copies them.
+      if (
+        fs.desktop &&
+        !(e.target instanceof Element && e.target.closest("#pane-files .files"))
+      ) {
+        for (const file of [...e.dataTransfer.files].filter((f) =>
+          /\.tideex$/i.test(f.name),
+        )) {
+          void file
+            .arrayBuffer()
+            .then((b) =>
+              extensionsView.install({
+                name: file.name,
+                bytes: new Uint8Array(b),
+              }),
+            );
+        }
       }
-    }
-  }, true);
+    },
+    true,
+  );
 }
 
 /** Delete items for the Explorer menu: one that Shift turns permanent, or both, by the setting. */
 function deleteItems(path: string, isDir: boolean): MenuItem[] {
-  const trash = { label: "Delete", shortcut: "Delete", run: () => void deleteEntry(path, isDir, false) };
-  const permanent = { label: "Delete permanently", shortcut: "Shift+Delete", run: () => void deleteEntry(path, isDir, true) };
-  return settings().shiftDeletes ? [{ ...trash, shift: permanent }] : [trash, permanent];
+  const trash = {
+    label: "Delete",
+    shortcut: "Delete",
+    run: () => void deleteEntry(path, isDir, false),
+  };
+  const permanent = {
+    label: "Delete permanently",
+    shortcut: "Shift+Delete",
+    run: () => void deleteEntry(path, isDir, true),
+  };
+  return settings().shiftDeletes
+    ? [{ ...trash, shift: permanent }]
+    : [trash, permanent];
 }
 
 /** Menu items for a folder: the project's root or one inside it. */
 function folderItems(path: string, isRoot: boolean): MenuItem[] {
   return [
-    ...(isRoot ? [] : [{ label: expanded.has(path) ? "Collapse" : "Expand", run: () => void toggleDir({ name: baseName(path), path, isDir: true }) }]),
+    ...(isRoot
+      ? []
+      : [
+          {
+            label: expanded.has(path) ? "Collapse" : "Expand",
+            run: () =>
+              void toggleDir({ name: baseName(path), path, isDir: true }),
+          },
+        ]),
     { label: "New file…", run: () => void createIn(path, "file") },
     { label: "New folder…", run: () => void createIn(path, "folder") },
     "-",
     { label: "Copy path", run: () => void copy(path, "path") },
-    { label: "Copy name", run: () => void copy(baseName(path), baseName(path)) },
+    {
+      label: "Copy name",
+      run: () => void copy(baseName(path), baseName(path)),
+    },
     "-",
-    { label: "Refresh", run: () => void (project && loadProject(project.root, false)) },
+    {
+      label: "Refresh",
+      run: () => void (project && loadProject(project.root, false)),
+    },
     ...(isRoot ? [] : ["-" as const, ...deleteItems(path, true)]),
-    ...(isRoot ? ["-" as const,
-      { label: "Project settings (.tide/tide.json)", run: () => void openProjectFile() },
-      { label: "Open another folder…", shortcut: "Ctrl+Shift+O", run: () => void openFolder() }] : []),
+    ...(isRoot
+      ? [
+          "-" as const,
+          {
+            label: "Project settings (.tide/tide.json)",
+            run: () => void openProjectFile(),
+          },
+          {
+            label: "Open another folder…",
+            shortcut: "Ctrl+Shift+O",
+            run: () => void openFolder(),
+          },
+        ]
+      : []),
   ];
 }
 
 /** What the menu offers depends on what was right-clicked. */
 function menuFor(target: HTMLElement): MenuItem[] | null {
-  const program = target.closest<HTMLElement>("[data-program]")?.dataset.program;
+  const program =
+    target.closest<HTMLElement>("[data-program]")?.dataset.program;
   if (program) {
     return [
       { label: "Open", run: () => void openProgram(program) },
-      { label: "Run in calculator", shortcut: "F5", disabled: !fs.available, run: () => void openProgram(program).then(runInEmulator) },
-      { label: "Build .8xp", shortcut: "Ctrl+E", run: () => void openProgram(program).then(() => exportActive()) },
+      {
+        label: "Run in calculator",
+        shortcut: "F5",
+        disabled: !fs.available,
+        run: () => void openProgram(program).then(runInEmulator),
+      },
+      {
+        label: "Build .8xp",
+        shortcut: "Ctrl+E",
+        run: () => void openProgram(program).then(() => exportActive()),
+      },
       "-",
       { label: "Copy name", run: () => void copy(program, program) },
       "-",
@@ -1900,24 +3320,44 @@ function menuFor(target: HTMLElement): MenuItem[] | null {
     ];
   }
   // The project's root folder: its header, or empty space below the tree.
-  if (project && target.closest(".project-head, #tree-empty, .files") && !target.closest("[data-path], [data-program], #list, #open-folder")) {
+  if (
+    project &&
+    target.closest(".project-head, #tree-empty, .files") &&
+    !target.closest("[data-path], [data-program], #list, #open-folder")
+  ) {
     return folderItems(project.root, true);
   }
   const row = target.closest<HTMLElement>("[data-path]");
   if (row?.dataset.dir === "true") return folderItems(row.dataset.path!, false);
   if (row) {
-    const path = row.dataset.path!, name = baseName(path), isDir = row.dataset.dir === "true";
+    const path = row.dataset.path!,
+      name = baseName(path),
+      isDir = row.dataset.dir === "true";
     const entry: Entry = { name, path, isDir };
     const tiFile = !isDir && SEND_TYPES.includes(extOf(name));
     return [
-      isDir ? { label: expanded.has(path) ? "Collapse" : "Expand", run: () => void toggleDir(entry) }
+      isDir
+        ? {
+            label: expanded.has(path) ? "Collapse" : "Expand",
+            run: () => void toggleDir(entry),
+          }
         : { label: "Open", run: () => void openFile(entry) },
-      ...(tiFile ? [{ label: "Send to calculator", run: () => void sendPath(path, name) }] : []),
+      ...(tiFile
+        ? [
+            {
+              label: "Send to calculator",
+              run: () => void sendPath(path, name),
+            },
+          ]
+        : []),
       "-",
       { label: "Copy path", run: () => void copy(path, "path") },
       { label: "Copy name", run: () => void copy(name, name) },
       "-",
-      { label: "Refresh", run: () => void (project && loadProject(project.root, false)) },
+      {
+        label: "Refresh",
+        run: () => void (project && loadProject(project.root, false)),
+      },
       "-",
       ...deleteItems(path, isDir),
     ];
@@ -1927,22 +3367,47 @@ function menuFor(target: HTMLElement): MenuItem[] | null {
     const path = docs.get(tab)?.hint ?? views.get(tab)?.hint;
     return [
       { label: "Close", shortcut: "Ctrl+W", run: () => closeTab(tab) },
-      { label: "Close others", disabled: tabOrder.length < 2, run: () => closeOthers(tab) },
-      { label: "Close to the right", disabled: tabOrder.indexOf(tab) === tabOrder.length - 1, run: () => closeOthers(tab, true) },
-      { label: "Close all", run: () => { for (const id of [...tabOrder]) closeTab(id); } },
-      ...(path ? ["-" as const, { label: "Copy path", run: () => void copy(path, "path") }] : []),
+      {
+        label: "Close others",
+        disabled: tabOrder.length < 2,
+        run: () => closeOthers(tab),
+      },
+      {
+        label: "Close to the right",
+        disabled: tabOrder.indexOf(tab) === tabOrder.length - 1,
+        run: () => closeOthers(tab, true),
+      },
+      {
+        label: "Close all",
+        run: () => {
+          for (const id of [...tabOrder]) closeTab(id);
+        },
+      },
+      ...(path
+        ? [
+            "-" as const,
+            { label: "Copy path", run: () => void copy(path, "path") },
+          ]
+        : []),
     ];
   }
   if (target.closest("#calc-lcd")) {
     return [
       { label: "Send files…", run: () => $("calc-send").click() },
-      { label: "Copy screenshot", run: () => {
-        $<HTMLCanvasElement>("calc-lcd").toBlob(blob => {
-          if (!blob) return;
-          navigator.clipboard.write([new ClipboardItem({ "image/png": blob })])
-            .then(() => setMessage("Copied the screen"), () => setMessage("Couldn't copy to the clipboard."));
-        });
-      } },
+      {
+        label: "Copy screenshot",
+        run: () => {
+          $<HTMLCanvasElement>("calc-lcd").toBlob((blob) => {
+            if (!blob) return;
+            navigator.clipboard
+              .write([new ClipboardItem({ "image/png": blob })])
+              .then(
+                () => setMessage("Copied the screen"),
+                () => setMessage("Couldn't copy to the clipboard."),
+              );
+          });
+        },
+      },
       { label: "Show console", run: () => panel.show("console") },
       "-",
       { label: "Reset calculator", run: () => $("calc-reset").click() },
@@ -1955,29 +3420,101 @@ function menuFor(target: HTMLElement): MenuItem[] | null {
 function editorMenu(position: monaco.IPosition | null): MenuItem[] {
   const doc = activeDoc();
   if (!doc) return [];
-  const act = (id: string) => () => { editor.focus(); void editor.getAction(id)?.run(); };
-  const word = position ? doc.model.getWordAtPosition(position)?.word : undefined;
+  const act = (id: string) => () => {
+    editor.focus();
+    void editor.getAction(id)?.run();
+  };
+  const word = position
+    ? doc.model.getWordAtPosition(position)?.word
+    : undefined;
   const lang = catalogLang();
-  const hasDocs = !!word && !!lang && DOCS.find(d => d.id === lang)!.groups.some(g => g.entries.some(e => e.name === word || e.name === `${word}(`));
+  const hasDocs =
+    !!word &&
+    !!lang &&
+    DOCS.find((d) => d.id === lang)!.groups.some((g) =>
+      g.entries.some((e) => e.name === word || e.name === `${word}(`),
+    );
   const selection = !editor.getSelection()?.isEmpty();
   return [
-    { label: "Cut", shortcut: "Ctrl+X", disabled: !selection, run: act("editor.action.clipboardCutAction") },
-    { label: "Copy", shortcut: "Ctrl+C", disabled: !selection, run: act("editor.action.clipboardCopyAction") },
-    { label: "Paste", shortcut: "Ctrl+V", run: () => {
-      navigator.clipboard.readText().then(text => { editor.focus(); editor.trigger("menu", "type", { text }); }, () => setMessage("Couldn't read the clipboard."));
-    } },
-    { label: "Select all", shortcut: "Ctrl+A", run: act("editor.action.selectAll") },
+    {
+      label: "Cut",
+      shortcut: "Ctrl+X",
+      disabled: !selection,
+      run: act("editor.action.clipboardCutAction"),
+    },
+    {
+      label: "Copy",
+      shortcut: "Ctrl+C",
+      disabled: !selection,
+      run: act("editor.action.clipboardCopyAction"),
+    },
+    {
+      label: "Paste",
+      shortcut: "Ctrl+V",
+      run: () => {
+        navigator.clipboard.readText().then(
+          (text) => {
+            editor.focus();
+            editor.trigger("menu", "type", { text });
+          },
+          () => setMessage("Couldn't read the clipboard."),
+        );
+      },
+    },
+    {
+      label: "Select all",
+      shortcut: "Ctrl+A",
+      run: act("editor.action.selectAll"),
+    },
     "-",
-    { label: "Toggle comment", shortcut: "Ctrl+/", run: act("editor.action.commentLine") },
-    { label: "Format document", shortcut: "Shift+Alt+F", disabled: !["tibasic", "c", "cpp", "python", ASM_LANG].includes(doc.language), run: act("editor.action.formatDocument") },
-    ...(doc.language === "tibasic" ? [{ label: "Go to label", shortcut: "F12", run: act("editor.action.revealDefinition") }] : []),
-    ...(hasDocs ? [{ label: `Docs for ${word}`, run: () => {
-      const name = DOCS.find(d => d.id === lang)!.groups.flatMap(g => g.entries).find(e => e.name === word || e.name === `${word}(`)!.name;
-      openDocs(name);
-    } }] : []),
+    {
+      label: "Toggle comment",
+      shortcut: "Ctrl+/",
+      run: act("editor.action.commentLine"),
+    },
+    {
+      label: "Format document",
+      shortcut: "Shift+Alt+F",
+      disabled: !["tibasic", "c", "cpp", "python", ASM_LANG].includes(
+        doc.language,
+      ),
+      run: act("editor.action.formatDocument"),
+    },
+    ...(doc.language === "tibasic"
+      ? [
+          {
+            label: "Go to label",
+            shortcut: "F12",
+            run: act("editor.action.revealDefinition"),
+          },
+        ]
+      : []),
+    ...(hasDocs
+      ? [
+          {
+            label: `Docs for ${word}`,
+            run: () => {
+              const name = DOCS.find((d) => d.id === lang)!
+                .groups.flatMap((g) => g.entries)
+                .find((e) => e.name === word || e.name === `${word}(`)!.name;
+              openDocs(name);
+            },
+          },
+        ]
+      : []),
     "-",
-    { label: "Run in calculator", shortcut: "F5", disabled: els.run.hidden, run: () => void runInEmulator() },
-    { label: usesMake() ? "Build" : "Build .8xp", shortcut: "Ctrl+E", disabled: els.exportBtn.hidden, run: () => void exportActive() },
+    {
+      label: "Run in calculator",
+      shortcut: "F5",
+      disabled: els.run.hidden,
+      run: () => void runInEmulator(),
+    },
+    {
+      label: buildLabel(),
+      shortcut: "Ctrl+E",
+      disabled: els.exportBtn.hidden,
+      run: () => void exportActive(),
+    },
     "-",
     ...extensionItems(),
   ];
@@ -1985,13 +3522,23 @@ function editorMenu(position: monaco.IPosition | null): MenuItem[] {
 
 /** Menu items for the commands extensions added. One that fails says so in the status bar. */
 function extensionItems(): MenuItem[] {
-  return extensionCommands().map(c => ({ label: c.label, shortcut: c.shortcut, run: () => {
-    Promise.resolve().then(c.run).catch(err => setMessage(`${c.label} failed: ${err instanceof Error ? err.message : err}`));
-  } }));
+  return extensionCommands().map((c) => ({
+    label: c.label,
+    shortcut: c.shortcut,
+    run: () => {
+      Promise.resolve()
+        .then(c.run)
+        .catch((err) =>
+          setMessage(
+            `${c.label} failed: ${err instanceof Error ? err.message : err}`,
+          ),
+        );
+    },
+  }));
 }
 
 // Every right-click gets TIde's menu or none; text boxes keep their own (for spelling and paste).
-document.addEventListener("contextmenu", e => {
+document.addEventListener("contextmenu", (e) => {
   const target = e.target as HTMLElement;
   if (target.closest("input, textarea, select, .monaco-editor")) {
     if (!target.closest(".monaco-editor")) return;
@@ -2001,11 +3548,12 @@ document.addEventListener("contextmenu", e => {
   const items = menuFor(target);
   if (items) showMenu(e.clientX, e.clientY, items);
 });
-editor.onContextMenu(e => {
+editor.onContextMenu((e) => {
   e.event.preventDefault();
   if (e.target.position) {
     const selection = editor.getSelection();
-    if (!selection || !selection.containsPosition(e.target.position)) editor.setPosition(e.target.position);
+    if (!selection || !selection.containsPosition(e.target.position))
+      editor.setPosition(e.target.position);
   }
   showMenu(e.event.posx, e.event.posy, editorMenu(e.target.position));
 });
@@ -2018,11 +3566,14 @@ els.docFind.addEventListener("input", renderDocList);
 els.docFind.addEventListener("keydown", docListKeys);
 els.docList.addEventListener("keydown", docListKeys);
 monaco.editor.onDidChangeMarkers(renderProblems);
-els.problems.addEventListener("click", () => { editor.focus(); void editor.getAction("editor.action.marker.next")?.run(); });
+els.problems.addEventListener("click", () => {
+  editor.focus();
+  void editor.getAction("editor.action.marker.next")?.run();
+});
 els.exportBtn.addEventListener("click", () => void exportActive());
 els.run.addEventListener("click", () => void runInEmulator());
 // F5 runs, as in most IDEs. It also stops the webview from reloading the page.
-window.addEventListener("keydown", e => {
+window.addEventListener("keydown", (e) => {
   if (e.key !== "F5") return;
   e.preventDefault();
   if (!els.run.hidden) void runInEmulator();
@@ -2031,118 +3582,307 @@ $("act-files").addEventListener("click", () => showPane("files", true));
 $("act-docs").addEventListener("click", () => showPane("docs", true));
 $("act-scm").addEventListener("click", () => showPane("scm", true));
 $("act-ext").addEventListener("click", () => showPane("ext", true));
-$("act-calc").addEventListener("click", () => void (active === CALC_TAB ? closeTab(CALC_TAB) : (views.has(CALC_TAB) ? activate(CALC_TAB) : calc.show())));
+$("act-calc").addEventListener(
+  "click",
+  () =>
+    void (active === CALC_TAB
+      ? closeTab(CALC_TAB)
+      : views.has(CALC_TAB)
+        ? activate(CALC_TAB)
+        : calc.show()),
+);
 $("calc-cemu").addEventListener("click", () => void runInCemu());
 $("status-branch").addEventListener("click", () => showPane("scm"));
-window.addEventListener("focus", () => { if (settings().refreshScmOnFocus) void scm.refresh(); }); // files may have changed outside TIde
+window.addEventListener("focus", () => {
+  if (settings().refreshScmOnFocus) void scm.refresh();
+}); // files may have changed outside TIde
 els.openFolder.addEventListener("click", () => void openFolder());
-$("new-file").addEventListener("click", () => void (project && createIn(targetDir ?? project.root, "file")));
-$("new-folder").addEventListener("click", () => void (project && createIn(targetDir ?? project.root, "folder")));
+$("new-file").addEventListener(
+  "click",
+  () => void (project && createIn(targetDir ?? project.root, "file")),
+);
+$("new-folder").addEventListener(
+  "click",
+  () => void (project && createIn(targetDir ?? project.root, "folder")),
+);
 // The File menu: programs, files, folders, saving, building and settings in one place.
-$("file-menu").addEventListener("click", e => {
+$("file-menu").addEventListener("click", (e) => {
   const r = (e.currentTarget as HTMLElement).getBoundingClientRect();
   const doc = activeDoc();
   showMenu(r.left, r.bottom + 2, [
-    { label: "New program…", shortcut: "Ctrl+N", run: () => { showPane("files"); els.find.focus(); } },
-    { label: "New file…", disabled: !project, run: () => void (project && createIn(targetDir ?? project.root, "file")) },
-    { label: "New folder…", disabled: !project, run: () => void (project && createIn(targetDir ?? project.root, "folder")) },
+    {
+      label: "New program…",
+      shortcut: "Ctrl+N",
+      run: () => {
+        showPane("files");
+        els.find.focus();
+      },
+    },
+    {
+      label: "New file…",
+      disabled: !project,
+      run: () => void (project && createIn(targetDir ?? project.root, "file")),
+    },
+    {
+      label: "New folder…",
+      disabled: !project,
+      run: () =>
+        void (project && createIn(targetDir ?? project.root, "folder")),
+    },
     "-",
-    { label: "Open folder…", shortcut: "Ctrl+Shift+O", run: () => void openFolder() },
-    ...(fs.web ? [{ label: "Open browser project…", run: () => void openBrowserProject() }] : []),
-    { label: "Send files to calculator…", run: () => { void calc.show().then(() => $("calc-send").click()); } },
+    {
+      label: "Open folder…",
+      shortcut: "Ctrl+Shift+O",
+      run: () => void openFolder(),
+    },
+    ...(fs.web
+      ? [
+          {
+            label: "Open browser project…",
+            run: () => void openBrowserProject(),
+          },
+        ]
+      : []),
+    {
+      label: "Send files to calculator…",
+      run: () => {
+        void calc.show().then(() => $("calc-send").click());
+      },
+    },
     { label: "Connect a calculator…", run: () => void calc.connectReal() },
     { label: "Serial cable…", run: () => openSerialTab() },
     "-",
-    { label: "Save", shortcut: "Ctrl+S", disabled: !doc, run: () => void saveActive() },
-    { label: "Reload from disk", disabled: !doc?.id.startsWith("file:") || !doc.encoding, run: () => {
-      if (!doc) return;
-      if (isDirty(doc) && !confirm(`Reload ${doc.label} from disk? Your unsaved changes in it are lost.`)) return;
-      void reloadFromDisk(doc, true);
-    } },
-    { label: "Save all", disabled: ![...docs.values()].some(isDirty), run: () => { for (const d of docs.values()) if (isDirty(d)) void saveDoc(d); } },
-    { label: "Auto save", checked: settings().autoSave, run: () => {
-      const on = !settings().autoSave;
-      setSetting("autoSave", on);
-      if (projectSettings().autoSave !== undefined && projectSettings().autoSave !== on) setMessage(`This project's tide.json turns auto save ${projectSettings().autoSave ? "on" : "off"}, which wins while it's open.`);
-      else setMessage(on ? "Auto save is on" : "Auto save is off");
-      if (settings().autoSave) autoSaveAll();
-    } },
+    {
+      label: "Save",
+      shortcut: "Ctrl+S",
+      disabled: !doc,
+      run: () => void saveActive(),
+    },
+    {
+      label: "Reload from disk",
+      disabled: !doc?.id.startsWith("file:") || !doc.encoding,
+      run: () => {
+        if (!doc) return;
+        if (
+          isDirty(doc) &&
+          !confirm(
+            `Reload ${doc.label} from disk? Your unsaved changes in it are lost.`,
+          )
+        )
+          return;
+        void reloadFromDisk(doc, true);
+      },
+    },
+    {
+      label: "Save all",
+      disabled: ![...docs.values()].some(isDirty),
+      run: () => {
+        for (const d of docs.values()) if (isDirty(d)) void saveDoc(d);
+      },
+    },
+    {
+      label: "Auto save",
+      checked: settings().autoSave,
+      run: () => {
+        const on = !settings().autoSave;
+        setSetting("autoSave", on);
+        if (
+          projectSettings().autoSave !== undefined &&
+          projectSettings().autoSave !== on
+        )
+          setMessage(
+            `This project's tide.json turns auto save ${projectSettings().autoSave ? "on" : "off"}, which wins while it's open.`,
+          );
+        else setMessage(on ? "Auto save is on" : "Auto save is off");
+        if (settings().autoSave) autoSaveAll();
+      },
+    },
     "-",
-    { label: usesMake() ? "Build" : "Build .8xp", shortcut: "Ctrl+E", disabled: els.exportBtn.hidden, run: () => void exportActive() },
-    { label: "Build to…", shortcut: "Ctrl+Shift+E", disabled: !doc || usesMake() || doc.language !== "tibasic", run: () => void exportActive(true) },
-    { label: "Run in calculator", shortcut: "F5", disabled: els.run.hidden, run: () => void runInEmulator() },
+    {
+      label: buildLabel(),
+      shortcut: "Ctrl+E",
+      disabled: els.exportBtn.hidden,
+      run: () => void exportActive(),
+    },
+    {
+      label: "Build to…",
+      shortcut: "Ctrl+Shift+E",
+      disabled:
+        !doc ||
+        usesMake() ||
+        (doc.language !== "tibasic" && !nspireScript(doc)),
+      run: () => void exportActive(true),
+    },
+    {
+      label: "Run in calculator",
+      shortcut: "F5",
+      disabled: els.run.hidden,
+      run: () => void runInEmulator(),
+    },
     "-",
-    { label: "Project settings (.tide/tide.json)", disabled: !project, run: () => void openProjectFile() },
-    { label: "Light mode", checked: isLight(), run: () => {
-      setSetting("theme", isLight() ? "dark" : "light");
-      if (projectSettings().theme) setMessage(`This project's tide.json sets the ${projectSettings().theme} theme, which wins while it's open.`);
-    } },
+    {
+      label: "Project settings (.tide/tide.json)",
+      disabled: !project,
+      run: () => void openProjectFile(),
+    },
+    {
+      label: "Light mode",
+      checked: isLight(),
+      run: () => {
+        setSetting("theme", isLight() ? "dark" : "light");
+        if (projectSettings().theme)
+          setMessage(
+            `This project's tide.json sets the ${projectSettings().theme} theme, which wins while it's open.`,
+          );
+      },
+    },
     { label: "Settings", shortcut: "Ctrl+,", run: openSettings },
-    { label: "Extensions", shortcut: "Ctrl+Shift+X", run: () => showPane("ext") },
-    { label: "Terminal", shortcut: "Ctrl+`", run: () => panel.show("terminal", true) },
-    { label: "Output", shortcut: "Ctrl+Shift+U", run: () => panel.show("output") },
+    {
+      label: "Extensions",
+      shortcut: "Ctrl+Shift+X",
+      run: () => showPane("ext"),
+    },
+    {
+      label: "Terminal",
+      shortcut: "Ctrl+`",
+      run: () => panel.show("terminal", true),
+    },
+    {
+      label: "Output",
+      shortcut: "Ctrl+Shift+U",
+      run: () => panel.show("output"),
+    },
     "-",
     ...extensionItems(),
     "-",
-    { label: "Close tab", shortcut: "Ctrl+W", disabled: !active, run: () => { if (active) closeTab(active); } },
-    { label: "Close all tabs", disabled: !tabOrder.length, run: () => { for (const id of [...tabOrder]) closeTab(id); } },
+    {
+      label: "Close tab",
+      shortcut: "Ctrl+W",
+      disabled: !active,
+      run: () => {
+        if (active) closeTab(active);
+      },
+    },
+    {
+      label: "Close all tabs",
+      disabled: !tabOrder.length,
+      run: () => {
+        for (const id of [...tabOrder]) closeTab(id);
+      },
+    },
   ]);
 });
 els.gutter.addEventListener("click", () => setGutter(!showNumbers));
 els.encoding.addEventListener("change", () => {
   const [action, key] = els.encoding.value.split(":");
   const encoding = encodingByKey(key);
-  if (encoding) void (action === "reopen" ? reopenWith(encoding) : saveWith(encoding));
+  if (encoding)
+    void (action === "reopen" ? reopenWith(encoding) : saveWith(encoding));
 });
 $("act-settings").addEventListener("click", openSettings);
-els.scripts.addEventListener("change", () => { const name = els.scripts.value; els.scripts.value = ""; if (name) void runScript(name); });
-onSettingsChange(s => {
+els.scripts.addEventListener("change", () => {
+  const name = els.scripts.value;
+  els.scripts.value = "";
+  if (name) void runScript(name);
+});
+onSettingsChange((s) => {
   editor.updateOptions({
-    fontSize: s.fontSize, lineHeight: Math.round(s.fontSize * 1.7), wordWrap: s.wordWrap ? "on" : "off",
-    minimap: { enabled: s.minimap }, renderWhitespace: s.renderWhitespace,
+    fontSize: s.fontSize,
+    lineHeight: Math.round(s.fontSize * 1.7),
+    wordWrap: s.wordWrap ? "on" : "off",
+    minimap: { enabled: s.minimap },
+    renderWhitespace: s.renderWhitespace,
   });
-  for (const doc of docs.values()) applyIndentation(doc.model, doc.label, doc.language, s.tabSize);
+  for (const doc of docs.values())
+    applyIndentation(doc.model, doc.label, doc.language, s.tabSize);
   applyEditorMode();
   emit("settings", s);
 });
-els.target.addEventListener("click", () => setTarget(getTarget() === "ce" ? "plus" : "ce"));
+els.target.addEventListener("click", () =>
+  setTarget(getTarget() === "ce" ? "plus" : "ce"),
+);
 onTargetChange(() => {
   applyEditorMode();
   refresh();
   void checkPrograms();
-  setMessage(`Target: TI-84 ${TARGETS[getTarget()].label === "CE" ? "Plus CE" : "Plus"}`);
+  setMessage(
+    `Target: TI-84 ${TARGETS[getTarget()].label === "CE" ? "Plus CE" : "Plus"}`,
+  );
 });
-els.find.addEventListener("keydown", e => {
+els.find.addEventListener("keydown", (e) => {
   if (e.key !== "Enter") return;
   // Enter opens the first match, so finding never makes a near-duplicate. Ctrl+Enter always creates.
   const query = els.find.value.toUpperCase();
-  const match = query && !mod(e) ? names.find(n => n.includes(query)) : undefined;
+  const match =
+    query && !mod(e) ? names.find((n) => n.includes(query)) : undefined;
   const name = normalizeName(els.find.value);
-  if (!match && !name) return setMessage("Names start with a letter and use only letters and digits.");
+  if (!match && !name)
+    return setMessage(
+      "Names start with a letter and use only letters and digits.",
+    );
   els.find.value = "";
   void (match ? openProgram(match) : createProgram(name));
 });
 
-window.addEventListener("keydown", e => {
+window.addEventListener("keydown", (e) => {
   if (!mod(e)) return;
   const key = e.key.toLowerCase(); // Caps Lock and Shift report capitals
-  if (e.shiftKey && key === "o") { e.preventDefault(); void openFolder(); }
-  else if (e.shiftKey && key === "e") { e.preventDefault(); void exportActive(true); }
-  else if (key === "s") { e.preventDefault(); void saveActive(); }
-  else if (key === "e") { e.preventDefault(); void exportActive(); }
-  else if (key === "w" && active) { e.preventDefault(); closeTab(active); }
-  else if (key === "n") { e.preventDefault(); showPane("files"); els.find.focus(); }
-  else if (e.shiftKey && key === "j") { e.preventDefault(); if (active === DOCS_TAB) closeTab(DOCS_TAB); else openDocs(); }
-  else if (key === "j") { e.preventDefault(); showPane("docs"); els.docFind.select(); }
-  else if (key === "b") { e.preventDefault(); showPane(pane, true); }
-  else if (e.shiftKey && key === "g") { e.preventDefault(); showPane("scm"); }
-  else if (e.shiftKey && key === "x") { e.preventDefault(); showPane("ext"); }
-  else if (e.shiftKey && key === "u") { e.preventDefault(); panel.toggle("output"); }
-  else if (e.key === "`") { e.preventDefault(); panel.toggle("terminal"); }
-  else if (key === ",") { e.preventDefault(); openSettings(); }
+  if (e.shiftKey && key === "o") {
+    e.preventDefault();
+    void openFolder();
+  } else if (e.shiftKey && key === "e") {
+    e.preventDefault();
+    void exportActive(true);
+  } else if (key === "s") {
+    e.preventDefault();
+    void saveActive();
+  } else if (key === "e") {
+    e.preventDefault();
+    void exportActive();
+  } else if (key === "w" && active) {
+    e.preventDefault();
+    closeTab(active);
+  } else if (key === "n") {
+    e.preventDefault();
+    showPane("files");
+    els.find.focus();
+  } else if (e.shiftKey && key === "j") {
+    e.preventDefault();
+    if (active === DOCS_TAB) closeTab(DOCS_TAB);
+    else openDocs();
+  } else if (key === "j") {
+    e.preventDefault();
+    showPane("docs");
+    els.docFind.select();
+  } else if (key === "b") {
+    e.preventDefault();
+    showPane(pane, true);
+  } else if (e.shiftKey && key === "g") {
+    e.preventDefault();
+    showPane("scm");
+  } else if (e.shiftKey && key === "x") {
+    e.preventDefault();
+    showPane("ext");
+  } else if (e.shiftKey && key === "u") {
+    e.preventDefault();
+    panel.toggle("output");
+  } else if (e.key === "`") {
+    e.preventDefault();
+    panel.toggle("terminal");
+  } else if (key === ",") {
+    e.preventDefault();
+    openSettings();
+  }
 });
 
-store.list().then(list => { names = list; refresh(); checkPrograms(); }).catch(err => setMessage(`Could not load programs: ${err}`));
+store
+  .list()
+  .then((list) => {
+    names = list;
+    refresh();
+    checkPrograms();
+  })
+  .catch((err) => setMessage(`Could not load programs: ${err}`));
 applyEditorMode();
 showPane("files");
 renderTree();
@@ -2153,54 +3893,118 @@ if (fs.web) {
   const version = $<HTMLButtonElement>("version");
   version.hidden = false;
   version.textContent = "TIde Web";
-  version.title = "Get the desktop app, with the terminal, source control and updates";
-  version.addEventListener("click", () => window.open("https://github.com/XSamuraiCoder/TIde/releases/latest", "_blank", "noopener"));
+  version.title =
+    "Get the desktop app, with the terminal, source control and updates";
+  version.addEventListener("click", () =>
+    window.open(
+      "https://github.com/XSamuraiCoder/TIde/releases/latest",
+      "_blank",
+      "noopener",
+    ),
+  );
   $("calc-cemu").hidden = true;
 }
 if (fs.desktop) {
   const version = $<HTMLButtonElement>("version");
   version.hidden = false;
-  appVersion().then(v => { version.textContent = `TIde ${v}`; }).catch(() => { version.textContent = "TIde"; });
+  appVersion()
+    .then((v) => {
+      version.textContent = `TIde ${v}`;
+    })
+    .catch(() => {
+      version.textContent = "TIde";
+    });
   version.addEventListener("click", () => void checkForUpdate(setMessage));
-  if (!import.meta.env.DEV && settings().checkUpdates) void checkForUpdate(setMessage, true);
+  if (!import.meta.env.DEV && settings().checkUpdates)
+    void checkForUpdate(setMessage, true);
 }
 
 // Extensions: TIde's own, then the installed ones. The view lists them in the side bar.
-const openPath = (path: string) => openFile({ name: baseName(path), path, isDir: false });
+const openPath = (path: string) =>
+  openFile({ name: baseName(path), path, isDir: false });
 const extensionsView = createExtensionsView({
-  available: fs.available, say: setMessage, openFile: openPath, reveal: path => fs.revealExtension(path),
+  available: fs.available,
+  say: setMessage,
+  openFile: openPath,
+  reveal: (path) => fs.revealExtension(path),
   pickPackage: () => fs.pickFile("TIde extension", ["tideex"]),
-  pickSaveFile: name => fs.pickSaveFile(name, { name: "TIde extension", extensions: ["tideex"] }),
-  readBinary: path => fs.readBinary(path),
+  pickSaveFile: (name) =>
+    fs.pickSaveFile(name, { name: "TIde extension", extensions: ["tideex"] }),
+  readBinary: (path) => fs.readBinary(path),
   writeBinary: (path, bytes) => fs.writeBinary(path, bytes),
   show: () => showPane("ext"),
 });
 // Started at once, so the built-in language support is there before any file opens.
 const extensionHost: ExtensionHost = {
   version: "dev",
-  extensionsDir: () => (fs.available ? fs.extensionsDir() : Promise.resolve(null)),
-  readDir: path => fs.readDir(path),
-  readFile: path => fs.readFile(path),
+  extensionsDir: () =>
+    fs.available ? fs.extensionsDir() : Promise.resolve(null),
+  readDir: (path) => fs.readDir(path),
+  readFile: (path) => fs.readFile(path),
   writeFile: (path, text) => fs.writeFile(path, text),
-  readBinary: path => fs.readBinary(path),
+  readBinary: (path) => fs.readBinary(path),
   writeBinary: (path, bytes) => fs.writeBinary(path, bytes),
-  remove: path => fs.deletePath(path, false),
+  remove: (path) => fs.deletePath(path, false),
+  run: async (line, dir) => runLine("Extension", line, dir, await nspireEnv()),
   message: setMessage,
   settings,
   project: () => project && { root: project.root, name: project.name },
   openFile: openPath,
   editor: {
-    file: () => { const d = activeDoc(); return d ? { name: d.label, path: d.id.startsWith("file:") ? d.id.slice(5) : null, language: d.language } : null; },
+    file: () => {
+      const d = activeDoc();
+      return d
+        ? {
+            name: d.label,
+            path: d.id.startsWith("file:") ? d.id.slice(5) : null,
+            language: d.language,
+          }
+        : null;
+    },
     text: () => activeDoc()?.model.getValue() ?? "",
-    setText: text => { const d = activeDoc(); if (d) d.model.pushEditOperations([], [{ range: d.model.getFullModelRange(), text }], () => null); },
-    selection: () => { const d = activeDoc(), sel = editor.getSelection(); return d && sel ? d.model.getValueInRange(sel) : ""; },
-    insert: text => { const sel = editor.getSelection(); if (activeDoc() && sel) editor.executeEdits("extension", [{ range: sel, text, forceMoveMarkers: true }]); },
+    setText: (text) => {
+      const d = activeDoc();
+      if (d)
+        d.model.pushEditOperations(
+          [],
+          [{ range: d.model.getFullModelRange(), text }],
+          () => null,
+        );
+    },
+    selection: () => {
+      const d = activeDoc(),
+        sel = editor.getSelection();
+      return d && sel ? d.model.getValueInRange(sel) : "";
+    },
+    insert: (text) => {
+      const sel = editor.getSelection();
+      if (activeDoc() && sel)
+        editor.executeEdits("extension", [
+          { range: sel, text, forceMoveMarkers: true },
+        ]);
+    },
   },
-  calculator: { show: () => calc.show(), macro: (name, arg) => calc.macro(name, arg ?? "") },
+  calculator: {
+    show: () => calc.show(),
+    macro: (name, arg) => calc.macro(name, arg ?? ""),
+    family: () => calc.family(),
+    send: (files) =>
+      calc.send(
+        files.map((f) => ({
+          name: f.name,
+          bytes:
+            f.bytes instanceof Uint8Array ? f.bytes : new Uint8Array(f.bytes),
+        })),
+      ),
+  },
 };
 // The extensions that come with TIde: the folders in extensions/, built into the app as text.
 const BUNDLED: BundledExtension[] = (() => {
-  const files = import.meta.glob("/extensions/*/*", { query: "?raw", import: "default", eager: true }) as Record<string, string>;
+  const files = import.meta.glob("/extensions/*/*", {
+    query: "?raw",
+    import: "default",
+    eager: true,
+  }) as Record<string, string>;
   const byId = new Map<string, Record<string, string>>();
   for (const [path, text] of Object.entries(files)) {
     const [, , id, name] = path.split("/");
@@ -2208,25 +4012,54 @@ const BUNDLED: BundledExtension[] = (() => {
     byId.get(id)![name] = text;
   }
   return [...byId].flatMap(([folder, own]) => {
-    const manifest = JSON.parse(own["extension.json"] ?? "null") as ExtensionManifest | null;
-    return manifest ? [{ id: manifest.id ?? folder, manifest, files: own }] : [];
+    const manifest = JSON.parse(
+      own["extension.json"] ?? "null",
+    ) as ExtensionManifest | null;
+    return manifest
+      ? [{ id: manifest.id ?? folder, manifest, files: own }]
+      : [];
   });
 })();
 const extensionsReady = loadExtensions(extensionHost, BUNDLED);
 // .TIdeex files install when TIde is opened with one (double-click, or Open with), or one is dropped on
 // the window. They wait for the installed extensions to load, so a newer version is seen as one.
 if (fs.desktop) {
-  const installOpened = () => fs.takeOpenedFiles().then(paths => { for (const p of paths) void extensionsView.install(p); });
+  const installOpened = () =>
+    fs.takeOpenedFiles().then((paths) => {
+      for (const p of paths) void extensionsView.install(p);
+    });
   void extensionsReady.then(installOpened);
-  import("@tauri-apps/api/event").then(({ listen }) => listen("tide://opened-files", () => void extensionsReady.then(installOpened))).catch(() => {});
+  import("@tauri-apps/api/event")
+    .then(({ listen }) =>
+      listen(
+        "tide://opened-files",
+        () => void extensionsReady.then(installOpened),
+      ),
+    )
+    .catch(() => {});
   // Dropped ones install from setUpDragging's drop handler.
 }
 setUpDragging();
-if (fs.desktop) appVersion().then(v => { extensionHost.version = v; }).catch(() => { /* stays "dev" */ });
+if (fs.desktop)
+  appVersion()
+    .then((v) => {
+      extensionHost.version = v;
+    })
+    .catch(() => {
+      /* stays "dev" */
+    });
 
 // Reopen the last project folder, quietly: if it moved or was deleted, just start empty.
 if (fs.available) {
   let last: string | null = null;
-  try { last = localStorage.getItem(PROJECT_PREF); } catch { /* storage unavailable */ }
-  if (last) loadProject(last, false).catch(() => { project = null; renderTree(); });
+  try {
+    last = localStorage.getItem(PROJECT_PREF);
+  } catch {
+    /* storage unavailable */
+  }
+  if (last)
+    loadProject(last, false).catch(() => {
+      project = null;
+      renderTree();
+    });
 }

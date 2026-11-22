@@ -19,13 +19,23 @@ const EXTENSION: &str = ".tide.txt";
 fn valid_name(name: &str) -> Result<String, String> {
     let name = name.to_ascii_uppercase();
     let ok = (1..=8).contains(&name.len())
-        && name.chars().all(|c| c.is_ascii_uppercase() || c.is_ascii_digit())
+        && name
+            .chars()
+            .all(|c| c.is_ascii_uppercase() || c.is_ascii_digit())
         && name.chars().next().is_some_and(|c| c.is_ascii_uppercase());
-    if ok { Ok(name) } else { Err(format!("\"{name}\" is not a valid program name")) }
+    if ok {
+        Ok(name)
+    } else {
+        Err(format!("\"{name}\" is not a valid program name"))
+    }
 }
 
 fn programs_dir(app: &tauri::AppHandle) -> Result<PathBuf, String> {
-    let dir = app.path().app_data_dir().map_err(|e| e.to_string())?.join("programs");
+    let dir = app
+        .path()
+        .app_data_dir()
+        .map_err(|e| e.to_string())?
+        .join("programs");
     fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
     Ok(dir)
 }
@@ -33,7 +43,11 @@ fn programs_dir(app: &tauri::AppHandle) -> Result<PathBuf, String> {
 /// The folder extensions are installed in, created if needed.
 #[tauri::command]
 fn extensions_dir(app: tauri::AppHandle) -> Result<String, String> {
-    let dir = app.path().app_data_dir().map_err(|e| e.to_string())?.join("extensions");
+    let dir = app
+        .path()
+        .app_data_dir()
+        .map_err(|e| e.to_string())?
+        .join("extensions");
     fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
     Ok(dir.to_string_lossy().into_owned())
 }
@@ -45,7 +59,9 @@ fn reveal_extension(app: tauri::AppHandle, path: Option<String>) -> Result<(), S
     let dir = match path {
         Some(p) => {
             let p = PathBuf::from(p);
-            if !p.starts_with(&root) { return Err("That isn't in the extensions folder.".into()); }
+            if !p.starts_with(&root) {
+                return Err("That isn't in the extensions folder.".into());
+            }
             p
         }
         None => root,
@@ -56,14 +72,19 @@ fn reveal_extension(app: tauri::AppHandle, path: Option<String>) -> Result<(), S
     let program = "open";
     #[cfg(not(any(target_os = "windows", target_os = "macos")))]
     let program = "xdg-open";
-    std::process::Command::new(program).arg(&dir).spawn().map(|_| ()).map_err(|e| e.to_string())
+    std::process::Command::new(program)
+        .arg(&dir)
+        .spawn()
+        .map(|_| ())
+        .map_err(|e| e.to_string())
 }
 
 /// .TIdeex files TIde was opened with (double-clicked, or Open with), until the page takes them.
 struct OpenedFiles(Mutex<Vec<String>>);
 
 fn tideex_paths(args: impl Iterator<Item = String>) -> Vec<String> {
-    args.filter(|a| a.to_lowercase().ends_with(".tideex")).collect()
+    args.filter(|a| a.to_lowercase().ends_with(".tideex"))
+        .collect()
 }
 
 /// The .TIdeex files TIde was opened with since the page last asked.
@@ -96,7 +117,13 @@ fn list_programs(app: tauri::AppHandle) -> Result<Vec<String>, String> {
     let mut names: Vec<String> = fs::read_dir(programs_dir(&app)?)
         .map_err(|e| e.to_string())?
         .filter_map(Result::ok)
-        .filter_map(|entry| entry.file_name().to_str()?.strip_suffix(EXTENSION).map(str::to_owned))
+        .filter_map(|entry| {
+            entry
+                .file_name()
+                .to_str()?
+                .strip_suffix(EXTENSION)
+                .map(str::to_owned)
+        })
         .collect();
     names.sort();
     Ok(names)
@@ -109,7 +136,9 @@ pub fn run() {
         .manage(shell::Shells::default())
         .manage(pty::Ptys::default())
         .manage(watch::FolderWatch::default())
-        .manage(OpenedFiles(Mutex::new(tideex_paths(std::env::args().skip(1)))))
+        .manage(OpenedFiles(Mutex::new(tideex_paths(
+            std::env::args().skip(1),
+        ))))
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
@@ -142,7 +171,10 @@ pub fn run() {
             emulator::emulator_run,
             calc::calc_files,
             calc::calc_set_rom,
+            calc::calc_set_nspire,
             calc::calc_remove_rom,
+            calc::calc_remove_nspire,
+            calc::calc_nspire_flash_write,
             calc::calc_read,
             link::link_devices,
             link::link_open,
@@ -186,7 +218,11 @@ pub fn run() {
             #[cfg(any(target_os = "macos", target_os = "ios"))]
             if let tauri::RunEvent::Opened { urls } = &_event {
                 use tauri::Emitter;
-                let files = tideex_paths(urls.iter().filter_map(|u| u.to_file_path().ok()).map(|p| p.to_string_lossy().into_owned()));
+                let files = tideex_paths(
+                    urls.iter()
+                        .filter_map(|u| u.to_file_path().ok())
+                        .map(|p| p.to_string_lossy().into_owned()),
+                );
                 if !files.is_empty() {
                     _app.state::<OpenedFiles>().0.lock().unwrap().extend(files);
                     let _ = _app.emit("tide://opened-files", ());

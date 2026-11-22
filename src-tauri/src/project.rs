@@ -57,7 +57,9 @@ pub fn read_binary_file(path: String) -> Result<tauri::ipc::Response, String> {
     if size > 16 * 1024 * 1024 {
         return Err("file is larger than 16 MB".into());
     }
-    fs::read(&path).map(tauri::ipc::Response::new).map_err(|e| e.to_string())
+    fs::read(&path)
+        .map(tauri::ipc::Response::new)
+        .map_err(|e| e.to_string())
 }
 
 #[tauri::command]
@@ -79,7 +81,12 @@ pub fn delete_path(path: String, permanent: bool) -> Result<(), String> {
     if !permanent {
         return trash::delete(p).map_err(|e| format!("Couldn't move it to the Recycle Bin: {e}"));
     }
-    if p.is_dir() { fs::remove_dir_all(p) } else { fs::remove_file(p) }.map_err(|e| e.to_string())
+    if p.is_dir() {
+        fs::remove_dir_all(p)
+    } else {
+        fs::remove_file(p)
+    }
+    .map_err(|e| e.to_string())
 }
 
 /// Moves (or renames) a file or folder to `to`, which mustn't exist yet. Across drives, where a
@@ -150,17 +157,30 @@ pub fn run_make(dir: String) -> Result<MakeResult, String> {
         command.creation_flags(CREATE_NO_WINDOW);
     }
     let out = command.output().map_err(|e| match e.kind() {
-        ErrorKind::NotFound => "make was not found. Install the CE toolchain and add it to PATH.".to_string(),
+        ErrorKind::NotFound => {
+            "make was not found. Install the CE toolchain and add it to PATH.".to_string()
+        }
         _ => e.to_string(),
     })?;
     let mut output = String::from_utf8_lossy(&out.stdout).into_owned();
     output.push_str(&String::from_utf8_lossy(&out.stderr));
-    Ok(MakeResult { ok: out.status.success(), output })
+    Ok(MakeResult {
+        ok: out.status.success(),
+        output,
+    })
 }
 
 /// Runs a build or task command from a project's .tide/project.json. Async so it doesn't freeze the window.
+/// `env`, when given, is added to the command's environment. With NDLESS_HOME set, the Ndless SDK's
+/// toolchain folders (<NDLESS_HOME>/bin and <NDLESS_HOME>/ndless-sdk/bin, when they exist) are put on
+/// PATH too, so Ndless Makefiles find nspire-gcc, nspire-ld, genzehn and make-prg.
 #[tauri::command(async)]
-pub fn run_command(dir: String, command: String, args: Vec<String>) -> Result<MakeResult, String> {
+pub fn run_command(
+    dir: String,
+    command: String,
+    args: Vec<String>,
+    env: Option<std::collections::HashMap<String, String>>,
+) -> Result<MakeResult, String> {
     let lower = command.to_ascii_lowercase();
     // Batch files only run through cmd.
     let mut cmd = if cfg!(windows) && (lower.ends_with(".bat") || lower.ends_with(".cmd")) {
@@ -171,6 +191,26 @@ pub fn run_command(dir: String, command: String, args: Vec<String>) -> Result<Ma
         Command::new(&command)
     };
     cmd.args(&args).current_dir(&dir);
+    if let Some(env) = env {
+        if let Some(home) = env.get("NDLESS_HOME") {
+            if !env.contains_key("PATH") {
+                let sep = if cfg!(windows) { ";" } else { ":" };
+                let mut bins: Vec<String> = ["bin", "ndless-sdk/bin"]
+                    .iter()
+                    .map(|sub| std::path::Path::new(home).join(sub))
+                    .filter(|p| p.is_dir())
+                    .map(|p| p.to_string_lossy().into_owned())
+                    .collect();
+                if !bins.is_empty() {
+                    if let Ok(path) = std::env::var("PATH") {
+                        bins.push(path);
+                        cmd.env("PATH", bins.join(sep));
+                    }
+                }
+            }
+        }
+        cmd.envs(env);
+    }
     #[cfg(windows)]
     {
         use std::os::windows::process::CommandExt;
@@ -178,12 +218,17 @@ pub fn run_command(dir: String, command: String, args: Vec<String>) -> Result<Ma
         cmd.creation_flags(CREATE_NO_WINDOW);
     }
     let out = cmd.output().map_err(|e| match e.kind() {
-        ErrorKind::NotFound => format!("{command} was not found. Check the command, or add it to PATH."),
+        ErrorKind::NotFound => {
+            format!("{command} was not found. Check the command, or add it to PATH.")
+        }
         _ => e.to_string(),
     })?;
     let mut output = String::from_utf8_lossy(&out.stdout).into_owned();
     output.push_str(&String::from_utf8_lossy(&out.stderr));
-    Ok(MakeResult { ok: out.status.success(), output })
+    Ok(MakeResult {
+        ok: out.status.success(),
+        output,
+    })
 }
 
 #[cfg(test)]
@@ -207,9 +252,34 @@ mod tests {
         } else {
             ("sh", vec!["-c".into(), "echo configured".into()])
         };
-        let result = run_command(dir, program.into(), args).unwrap();
+        let result = run_command(dir, program.into(), args, None).unwrap();
         assert!(result.ok && result.output.contains("configured"));
-        assert!(run_command(std::env::temp_dir().to_string_lossy().into_owned(), "no-such-program-tide".into(), vec![]).is_err());
+        assert!(
+            run_command(
+                std::env::temp_dir().to_string_lossy().into_owned(),
+                "no-such-program-tide".into(),
+                vec![],
+                None
+            )
+            .is_err()
+        );
+    }
+
+    #[test]
+    fn run_command_takes_env() {
+        let dir = std::env::temp_dir().to_string_lossy().into_owned();
+        let (program, args): (&str, Vec<String>) = if cfg!(windows) {
+            (
+                "cmd",
+                vec!["/C".into(), "echo".into(), "%TIDE_TEST_VAR%".into()],
+            )
+        } else {
+            ("sh", vec!["-c".into(), "echo \"$TIDE_TEST_VAR\"".into()])
+        };
+        let mut env = std::collections::HashMap::new();
+        env.insert("TIDE_TEST_VAR".to_string(), "from-env".to_string());
+        let result = run_command(dir, program.into(), args, Some(env)).unwrap();
+        assert!(result.ok && result.output.contains("from-env"));
     }
 
     #[test]
