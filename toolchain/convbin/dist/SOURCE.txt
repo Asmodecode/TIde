@@ -1,0 +1,3 @@
+convbin.js and convbin.wasm are convbin (BSD 3-clause, Matt Waltz), built from
+https://github.com/mateoconlechuga/convbin/tree/ba4e4a4ee4be8c86ec7ed48f156a98fcf696536c
+(with its zx submodule at 80efdfcac6e67f720e7d388017b4bfdb1b10606b) by ../build.sh.

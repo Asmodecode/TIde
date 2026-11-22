@@ -1,0 +1,3 @@
+cedev-obj.js and cedev-obj.wasm are cedev-obj from the CE toolchain (LGPLv3), built from
+https://github.com/CE-Programming/toolchain/tree/07fe80429f549a826b08f60587f31f50094b6063/tools/cedev-obj (v15.0)
+by ../build.sh.

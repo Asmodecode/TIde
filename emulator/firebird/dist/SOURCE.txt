@@ -1,0 +1,8 @@
+firebird.js and firebird.wasm are Firebird's core (GPLv3), the TI-Nspire CX emulator, built from
+https://github.com/nspire-emus/firebird (master snapshot, as provided in firebird-master/)
+with TIde's bridge, ../tide_firebird.cpp, in place of the core's emscripten/main.cpp, by
+../build.sh using Emscripten 7.0.0 (homebrew):
+
+  sh emulator/firebird/build.sh firebird-master emulator/firebird/dist
+
+TIde builds them into the app.

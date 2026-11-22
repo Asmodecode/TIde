@@ -1,0 +1,73 @@
+name: Web toolchain
+
+# Builds ez80-clang for WebAssembly (toolchain/clang/build.sh) and publishes it to the
+# "web-toolchain" release, where the web version's build downloads it: at tens of megabytes it's
+# too big to keep in the repository like the other tools in toolchain/. It runs when the Clang build
+# changes on the web branch, or by hand.
+#
+# It takes hours, close to GitHub's six-hour limit for a job, so the build folder is cached even when
+# the build stops partway: running the workflow again carries on from where it got to.
+on:
+  workflow_dispatch:
+  push:
+    branches: [web]
+    paths:
+      - toolchain/clang/build.sh
+      - .github/workflows/toolchain.yml
+
+permissions:
+  contents: write
+
+concurrency:
+  group: web-toolchain
+  cancel-in-progress: false
+
+jobs:
+  clang:
+    name: ez80-clang for WebAssembly
+    runs-on: ubuntu-latest
+    timeout-minutes: 355
+    env:
+      BUILD: /home/runner/llvm
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Name the cache after the build script
+        run: echo "KEY=clang-${{ hashFiles('toolchain/clang/build.sh') }}" >> "$GITHUB_ENV"
+
+      - name: Restore the build folder from an earlier run
+        uses: actions/cache/restore@v4
+        with:
+          path: /home/runner/llvm
+          key: ${{ env.KEY }}-${{ github.run_id }}-${{ github.run_attempt }}
+          restore-keys: ${{ env.KEY }}-
+
+      - name: Build
+        id: build
+        timeout-minutes: 325
+        run: |
+          mkdir -p "$BUILD"
+          docker run --rm -v "$PWD:/w" -w /w -e JOBS=4 \
+            -v "$BUILD:/build" emscripten/emsdk:3.1.74 sh toolchain/clang/build.sh toolchain/clang/dist
+          printf 'clang.js and clang.wasm are ez80-clang from CE-Programming/llvm-project (Apache-2.0 with LLVM exceptions),\nbuilt from https://github.com/CE-Programming/llvm-project/tree/ef28e9c54cd1333a6091ab2ffbd315b465fc5090 (the one in CE C Toolchain v15.0)\nby toolchain/clang/build.sh in https://github.com/%s/tree/%s.\n' "$GITHUB_REPOSITORY" "$GITHUB_SHA" > toolchain/clang/dist/SOURCE.txt
+          ls -la toolchain/clang/dist
+
+      # Also when the build ran out of time, so the next run doesn't start over.
+      - name: Save the build folder
+        if: always() && steps.build.outcome != 'skipped'
+        uses: actions/cache/save@v4
+        with:
+          path: /home/runner/llvm
+          key: ${{ env.KEY }}-${{ github.run_id }}-${{ github.run_attempt }}
+
+      - name: Publish to the web-toolchain release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+        run: |
+          if ! gh release view web-toolchain --repo "$REPO" >/dev/null 2>&1; then
+            gh release create web-toolchain --repo "$REPO" --prerelease --title "Web toolchain" \
+              --notes "ez80-clang compiled to WebAssembly, for TIde's web version. Built by the Web toolchain workflow."
+          fi
+          gh release upload web-toolchain toolchain/clang/dist/clang.js toolchain/clang/dist/clang.wasm toolchain/clang/dist/SOURCE.txt \
+            --repo "$REPO" --clobber

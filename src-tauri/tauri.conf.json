@@ -1,0 +1,62 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "TIde",
+  "version": "1.7.0",
+  "identifier": "com.tide.tide",
+  "build": {
+    "beforeDevCommand": "npm run dev",
+    "devUrl": "http://localhost:1420",
+    "beforeBuildCommand": "npm run build",
+    "frontendDist": "../dist"
+  },
+  "app": {
+    "withGlobalTauri": true,
+    "windows": [
+      {
+        "title": "TIde",
+        "width": 800,
+        "height": 600,
+        "dragDropEnabled": false
+      }
+    ],
+    "security": {
+      "csp": null,
+      "headers": {
+        "Cross-Origin-Opener-Policy": "same-origin",
+        "Cross-Origin-Embedder-Policy": "credentialless"
+      }
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": "all",
+    "icon": [
+      "icons/32x32.png",
+      "icons/128x128.png",
+      "icons/128x128@2x.png",
+      "icons/icon.icns",
+      "icons/icon.ico"
+    ],
+    "fileAssociations": [
+      {
+        "ext": ["tideex"],
+        "name": "TIde Extension",
+        "description": "A TIde extension",
+        "role": "Viewer",
+        "mimeType": "application/x-tideex",
+        "exportedType": { "identifier": "com.tide.tide.extension", "conformsTo": ["public.zip-archive"] }
+      }
+    ]
+  },
+  "plugins": {
+    "updater": {
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDBBNkUwRTlEMTgxQjY1N0YKUldSL1pSc1luUTV1Q2c4eEM2V0NocDNJTFJ0Z05LVHFvcEFYK2FGeGVsSHdDT09BbmJFdzQ4em4K",
+      "endpoints": [
+        "https://github.com/XSamuraiCoder/TIde/releases/latest/download/latest.json"
+      ],
+      "windows": {
+        "installMode": "passive"
+      }
+    }
+  }
+}
