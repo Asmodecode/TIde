@@ -163,7 +163,7 @@ function format(model: monaco.editor.ITextModel, options: monaco.languages.Forma
 }
 
 export function registerIndentation() {
-  for (const language of ["tibasic", "c", "cpp", "python", ASM_LANG]) {
+  for (const language of ["tibasic", "c", "cpp", "python", "tipython", ASM_LANG]) {
     monaco.languages.registerDocumentFormattingEditProvider(language, { displayName: "TIde", provideDocumentFormattingEdits: (model, options) => format(model, options) });
   }
 }

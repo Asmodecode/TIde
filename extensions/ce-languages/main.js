@@ -4,5 +4,5 @@
 
 /** @param {Tide} tide */
 export function activate(tide) {
-  for (const language of ["tibasic", "c", "ez80", "python"]) tide.languages.builtIn(language);
+  for (const language of ["tibasic", "c", "ez80", "python", "tipython"]) tide.languages.builtIn(language);
 }

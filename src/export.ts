@@ -11,7 +11,7 @@ export async function exportProgram(name: string, tokens: number[], previous?: s
 
   if (!fs.available) {
     const link = document.createElement("a");
-    link.href = URL.createObjectURL(new Blob([bytes], { type: "application/octet-stream" }));
+    link.href = URL.createObjectURL(new Blob([bytes as BlobPart], { type: "application/octet-stream" }));
     link.download = `${name}.8xp`;
     link.click();
     URL.revokeObjectURL(link.href);

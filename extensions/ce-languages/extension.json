@@ -3,7 +3,7 @@
   "id": "tide.ce-languages",
   "version": "1.0.0",
   "author": "TIde",
-  "description": "Language support for the TI-84 Plus CE: TI-BASIC, CE C, eZ80 assembly and py2ez80, with completions, hover help, signature help and docs, plus whole-program patterns for each.",
+  "description": "TI-Python support for the TI-84 Evo and CE Python, plus language support for CE TI-BASIC, C, eZ80 assembly and py2ez80.",
   "main": "main.js",
   "contributes": {
     "snippets": [

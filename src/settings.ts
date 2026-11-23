@@ -20,6 +20,8 @@ export interface Settings {
   autoSave: boolean;
   /** Dark, light, or whichever the system uses. */
   theme: "dark" | "light" | "system";
+  /** When an opened folder's tide.json lacks its calculator or language: ask, ask only when its files disagree, or never. */
+  projectSetup: "always" | "conflicts" | "never";
 }
 
 const DEFAULTS: Settings = {
@@ -38,6 +40,7 @@ const DEFAULTS: Settings = {
   shiftDeletes: true,
   autoSave: false,
   theme: "dark",
+  projectSetup: "always",
 };
 const PREF = "tide-pref-settings"; // not "tide:", which the browser store treats as a program
 

@@ -10,9 +10,10 @@ import { languageFor, registerTiBasic, tiCatalog } from "./language";
 import { applyIndentation, registerIndentation } from "./indent";
 import { isLight, watchTheme } from "./theme";
 import { createSerialView } from "./serial-view";
-import { TARGETS, getTarget, onTargetChange, setTarget } from "./target";
+import { TARGETS, getTarget, isTarget, onTargetChange, setTarget, type Target } from "./target";
 import { C_CATALOG } from "./c-support";
 import { PY_CATALOG, watchPython } from "./py2ez80-support";
+import { TI_PYTHON_CATALOG } from "./tipython-support";
 import { ASM_CATALOG, ASM_LANG } from "./asm-support";
 import { appVersion, checkForUpdate } from "./updater";
 import { createScm } from "./scm";
@@ -38,6 +39,7 @@ import {
   settings,
   settingsPage,
   type Row,
+  type Settings,
 } from "./settings";
 import {
   CONFIG_DIR,
@@ -50,6 +52,7 @@ import {
   splitPattern,
   steps,
   type ProjectConfig,
+  type ProjectLanguage,
 } from "./config";
 import { DOCS, createDocs, type DocLangId } from "./docs";
 import { watchModel } from "./intellisense";
@@ -151,7 +154,6 @@ const els = {
   pos: $("status-pos"),
   size: $("status-size"),
   gutter: $<HTMLButtonElement>("gutter"),
-  target: $<HTMLButtonElement>("target"),
   problems: $<HTMLButtonElement>("problems"),
   docFind: $<HTMLInputElement>("doc-find"),
   docList: $("doc-list"),
@@ -456,7 +458,9 @@ const dirName = (path: string) => {
 };
 /** A script Run packs into a .tns with Luna: any .lua file, or a .py file outside a make project. */
 const nspireScript = (d = activeDoc()) =>
-  !!d && (d.language === "lua" || d.language === "python");
+  !!d &&
+  (d.language === "lua" ||
+    ((d.language === "tipython" || d.language === "python") && getTarget() === "nspire"));
 /** The Build button's label for what the active file builds into. */
 const buildLabel = () =>
   usesMake() ? "Build" : nspireScript() ? "Pack .tns" : "Build .8xp";
@@ -564,6 +568,7 @@ async function openFile(entry: Entry) {
   if (docs.has(id) || views.has(id)) return activate(id);
   if (SEND_TYPES.includes(extOf(entry.name)))
     return openView(await tiFileView(entry, bytes));
+  if (IMAGE_TYPES[extOf(entry.name)]) return openView(imageView(entry, bytes));
   const fallback = encodingByKey(settings().fallbackEncoding) ?? ENCODINGS[4];
   const found = detect(bytes, fallback);
   if (!found) return openView(unsupportedView(entry, bytes));
@@ -580,7 +585,7 @@ function openText(entry: Entry, text: string, encoding: Encoding) {
     id,
     label: entry.name,
     hint: entry.path,
-    language: languageFor(entry.name),
+    language: projectLanguageFor(entry.name),
     source: text,
     async write(s) {
       // A file dropped from outside has nowhere to go back to: the first save asks where.
@@ -634,6 +639,96 @@ async function saveWith(encoding: Encoding) {
   if (!(await saveDoc(doc))) doc.encoding = before;
   else setMessage(`Saved ${doc.label} as ${encoding.label}`);
   refresh();
+}
+
+/** Image files the editor shows as pictures, with the type each is served as. */
+const IMAGE_TYPES: Record<string, string> = {
+  png: "image/png", jpg: "image/jpeg", jpeg: "image/jpeg", gif: "image/gif", bmp: "image/bmp",
+  webp: "image/webp", avif: "image/avif", ico: "image/x-icon", svg: "image/svg+xml",
+};
+
+/**
+ * An image file, shown in the editor: the picture on a checkerboard (so transparency shows), with
+ * its dimensions and size above. It opens fitted to the editor; it zooms with the − and + buttons,
+ * Ctrl+wheel (or a trackpad pinch) about the pointer, and +, − and 0 (fit) while it has focus.
+ * Clicking the percentage goes to 100%. Zoomed past 100%, pixels stay sharp, for sprites.
+ */
+function imageView(entry: Entry, bytes: Uint8Array): View {
+  const url = URL.createObjectURL(new Blob([bytes as BlobPart], { type: IMAGE_TYPES[extOf(entry.name)] }));
+  const img = h("img", { src: url, alt: entry.name, draggable: false });
+  const stage = h("div", { className: "image-stage", tabIndex: 0 }, img);
+  const info = h("span", { className: "image-info" }, `${bytes.length.toLocaleString()} bytes`);
+  const level = h("button", { type: "button", className: "image-level", title: "Actual size (100%)" }, "");
+  const out = h("button", { type: "button", title: "Zoom out (−)" }, "−");
+  const into = h("button", { type: "button", title: "Zoom in (+)" }, "+");
+  const fitButton = h("button", { type: "button", title: "Fit to the editor (0)" }, "Fit");
+  const MIN = 0.05, MAX = 64;
+  let scale = 1, fitted = true;
+  const fitScale = () => {
+    if (!img.naturalWidth) return 1;
+    const w = stage.clientWidth - 32, h2 = stage.clientHeight - 32;
+    return Math.min(1, w / img.naturalWidth, h2 / img.naturalHeight);
+  };
+  /** Sets the zoom; keeps the point under (x, y) in the stage, or its centre, where it was. */
+  const zoom = (next: number, x = stage.clientWidth / 2, y = stage.clientHeight / 2) => {
+    next = Math.min(MAX, Math.max(MIN, next));
+    const before = scale;
+    const px = (stage.scrollLeft + x) / before, py = (stage.scrollTop + y) / before;
+    scale = next;
+    img.style.width = `${Math.round(img.naturalWidth * scale)}px`;
+    img.style.height = `${Math.round(img.naturalHeight * scale)}px`;
+    stage.classList.toggle("sharp", scale > 1);
+    level.textContent = `${Math.round(scale * 100)}%`;
+    fitButton.classList.toggle("on", fitted);
+    stage.scrollLeft = px * scale - x;
+    stage.scrollTop = py * scale - y;
+  };
+  const fit = () => { fitted = true; zoom(fitScale()); };
+  // Steps through 25%, 50%, 100%, 200%... with a few in between.
+  const STEPS = [0.05, 0.1, 0.25, 0.33, 0.5, 0.67, 1, 1.5, 2, 3, 4, 6, 8, 12, 16, 24, 32, 48, 64];
+  const step = (dir: 1 | -1) => {
+    fitted = false;
+    zoom(dir > 0 ? STEPS.find(s2 => s2 > scale + 1e-6) ?? MAX : [...STEPS].reverse().find(s2 => s2 < scale - 1e-6) ?? MIN);
+  };
+  out.onclick = () => step(-1);
+  into.onclick = () => step(1);
+  fitButton.onclick = fit;
+  level.onclick = () => { fitted = false; zoom(1); };
+  stage.addEventListener("wheel", (e) => {
+    if (!e.ctrlKey && !e.metaKey) return;
+    e.preventDefault();
+    const r = stage.getBoundingClientRect();
+    fitted = false;
+    zoom(scale * Math.exp(-e.deltaY * 0.0025), e.clientX - r.left, e.clientY - r.top);
+  }, { passive: false });
+  stage.addEventListener("keydown", (e) => {
+    if (e.key === "+" || e.key === "=") step(1);
+    else if (e.key === "-" || e.key === "_") step(-1);
+    else if (e.key === "0") fit();
+    else return;
+    e.preventDefault();
+  });
+  // Fitted, it follows the editor's size.
+  new ResizeObserver(() => { if (fitted && img.naturalWidth) zoom(fitScale()); }).observe(stage);
+  img.onload = () => {
+    info.textContent = `${img.naturalWidth} × ${img.naturalHeight} px · ${bytes.length.toLocaleString()} bytes`;
+    fit();
+  };
+  img.onerror = () => {
+    stage.replaceChildren(h("p", { className: "notice" }, "This image couldn't be shown: the file may be damaged, or in a form this browser doesn't read."));
+  };
+  return {
+    id: fileId(entry.path),
+    label: entry.name,
+    hint: entry.path,
+    el: h(
+      "div",
+      { className: "image-view" },
+      h("div", { className: "image-bar" }, h("strong", {}, entry.name), info,
+        h("span", { className: "image-zoom" }, out, level, into, fitButton)),
+      stage,
+    ),
+  };
 }
 
 /** A tab for a file that is binary or not text in any encoding TIde recognises. */
@@ -859,55 +954,40 @@ const panel = createPanel({
 toConsole = (text, kind) => panel.console(text, kind);
 $("calc-console-toggle").addEventListener("click", () => panel.show("console"));
 for (const [text, kind] of consoleBacklog.splice(0)) panel.console(text, kind);
-// ── Output tab: build and script output ──
-const outputLog = h("pre", { className: "output-log" });
-const outputView: View = {
-  id: "output",
-  label: "Output",
-  el: h(
-    "div",
-    { className: "output-view" },
-    h(
-      "div",
-      { className: "title-row" },
-      h("h1", {}, "Output"),
-      h(
-        "button",
-        { type: "button", onclick: () => outputLog.replaceChildren() },
-        "Clear",
-      ),
-    ),
-    outputLog,
-  ),
-};
+// ── Output: build, script and prerun logs, in the panel under the editor (panel.ts) ──
 function output(text: string, kind: "cmd" | "ok" | "err" | "" = "") {
-  const atEnd =
-    outputLog.scrollTop + outputLog.clientHeight >= outputLog.scrollHeight - 4;
-  outputLog.append(
-    h("span", { className: kind }, text.endsWith("\n") ? text : `${text}\n`),
-  );
-  if (atEnd) outputLog.scrollTop = outputLog.scrollHeight;
+  panel.output(text.replace(/\n$/, ""), kind);
 }
-const openOutput = () => openView(outputView, "Opened Output");
+const openOutput = () => panel.show("output");
 
-/** Runs a command line in `dir` (the project folder by default), writing it and its output to the Output tab. */
+/**
+ * Runs a command line in the system shell, so &&, pipes, redirects and variables work as in a
+ * terminal, in `dir` (the project folder by default), with `env` added to its environment (a
+ * Nspire project's NDLESS_HOME, whose bin folders go on PATH). Its output streams into Output, with
+ * a Stop button while it runs.
+ */
 async function runLine(
   label: string,
   line: string,
   dir?: string,
   env?: Record<string, string>,
 ): Promise<{ ok: boolean; output: string }> {
-  const { command, args } = splitCommand(line);
   const cwd = dir ?? project?.root;
   if (!cwd) throw new Error("Open a folder to run a command in it.");
-  output(`> ${label}: ${line}`, "cmd");
-  const result = await fs.runCommand(cwd, command, args, env);
-  if (result.output.trim()) output(result.output);
-  output(
-    result.ok ? `${label} finished.` : `${label} failed.`,
-    result.ok ? "ok" : "err",
-  );
-  return result;
+  panel.show("output");
+  let text = "";
+  let stop = () => {};
+  const run = panel.outputRun(label, line, () => stop());
+  const shell = fs.runShell(cwd, line, (chunk, err) => { text += chunk; run.write(chunk, err); }, env);
+  stop = () => void shell.stop();
+  const code = await shell.done.catch(err => {
+    const message = `${err}`;
+    text += message;
+    run.write(`${message}\n`, true);
+    return 1;
+  });
+  run.end(code === 0, code);
+  return { ok: code === 0, output: text };
 }
 
 async function runScript(name: string) {
@@ -994,7 +1074,7 @@ async function makefileIsNdless(): Promise<boolean> {
 
 /** The environment for building a Nspire project: NDLESS_HOME, whose bin folders go on PATH (see run_command). */
 const nspireEnv = async () =>
-  (config.calculator === "nspire" || (await makefileIsNdless())) &&
+  (config.calculator === "nspire" || (!!project && getTarget() === "nspire") || (await makefileIsNdless())) &&
   settings().ndlessHome.trim()
     ? { NDLESS_HOME: settings().ndlessHome.trim() }
     : undefined;
@@ -1051,11 +1131,8 @@ async function loadConfig(exists = true) {
     }
   }
   setProjectSettings(config.editor ?? {});
-  // "nspire" targets the calculator panel's model, not TI-BASIC's screen checks, which stay ce/plus.
-  if (
-    (config.calculator === "ce" || config.calculator === "plus") &&
-    config.calculator !== getTarget()
-  )
+  // A project's tide.json names its calculator, and that is the target while it's open.
+  if (isTarget(config.calculator) && config.calculator !== getTarget())
     setTarget(config.calculator);
   calc.setLink(config.link);
   renderScripts();
@@ -1243,9 +1320,10 @@ function settingRows(): Row[] {
         options: [
           ["ce", "TI-84 Plus CE"],
           ["plus", "TI-84 Plus"],
+          ["nspire", "TI-Nspire CX"],
         ],
         get: () => getTarget(),
-        set: (v) => setTarget(v as "ce" | "plus"),
+        set: (v) => void chooseTarget(v as Target),
       },
     },
     {
@@ -1349,6 +1427,34 @@ function settingRows(): Row[] {
         kind: "button",
         label: "Check for updates",
         run: () => void checkForUpdate(setMessage),
+      },
+    },
+    {
+      section: "Project",
+      label: "Set up a folder when it opens",
+      description:
+        "When an opened folder's tide.json doesn't say which calculator it's for or its language, ask, with what its files show already chosen. The answer goes in tide.json. Only when its files point more than one way, or never: then the files decide.",
+      control: {
+        kind: "select",
+        options: [
+          ["always", "Ask"],
+          ["conflicts", "Only when its files disagree"],
+          ["never", "Never"],
+        ],
+        get: () => s.projectSetup,
+        set: (v) => setSetting("projectSetup", v as Settings["projectSetup"]),
+      },
+    },
+    {
+      section: "Project",
+      label: "Calculator and language",
+      description: project
+        ? `Choose which calculator ${project.name} is for and what it's written in, kept in its tide.json.`
+        : "Open a folder to set it up.",
+      control: {
+        kind: "button",
+        label: project ? "Set up this folder…" : "No folder open",
+        run: () => void setUpProject(),
       },
     },
     {
@@ -1631,8 +1737,9 @@ async function buildForRun(): Promise<ForRun | null> {
     setMessage("Running programs needs the desktop app.");
     return null;
   }
-  // A project is for the Nspire when tide.json says so, or when its Makefile uses the Ndless SDK's tools.
-  const nspire = config.calculator === "nspire" || (await makefileIsNdless());
+  // A project is for the Nspire when its target is (tide.json's "calculator", or what its files show),
+  // or when its Makefile uses the Ndless SDK's tools.
+  const nspire = getTarget() === "nspire" || config.calculator === "nspire" || (await makefileIsNdless());
   if (isBasic()) {
     // TI-BASIC runs as an .8xp: on the CE when the target is CE, or on a TI-83 Plus or 84 Plus.
     const family = await calc.family();
@@ -1950,6 +2057,463 @@ async function deleteProgram(name: string) {
   refresh();
 }
 
+// ── Setting up a project: which calculator it's for, and its language ──
+// tide.json's "calculator" and "language" decide them. Without them, the folder's files show them:
+// a Makefile using the CE toolchain or the Ndless SDK, Lua scripts and .tns files, z80 or eZ80
+// assembly, C, C++, Python, .8xp programs. Opening a folder asks for whatever tide.json leaves
+// out, with what the files show already chosen, and keeps the answer in tide.json (Settings →
+// Project → "Set up a folder when it opens": always, only when the files point several ways, or
+// never). Whatever isn't asked, the files decide: one calculator found becomes the target.
+
+const LANGUAGES: Record<ProjectLanguage, string> = {
+  tibasic: "TI-BASIC", c: "C", cpp: "C++", ez80: "eZ80 assembly", z80: "z80 assembly",
+  tipython: "TI-Python", py2ez80: "py2ez80", lua: "Lua",
+};
+/** What a language choice is, under its name. */
+const LANGUAGE_NOTES: Partial<Record<ProjectLanguage, string>> = {
+  tipython: "The calculator's Python app",
+  py2ez80: "Python compiled to a CE program",
+  ez80: "fasmg, or spasm-ng",
+  z80: "spasm-ng",
+  c: "", cpp: "",
+};
+/** The languages each calculator's programs are written in, as TIde builds and runs them. */
+const LANGUAGES_FOR: Record<Target, ProjectLanguage[]> = {
+  ce: ["tibasic", "c", "cpp", "ez80", "tipython", "py2ez80"],
+  plus: ["tibasic", "z80"],
+  nspire: ["lua", "c", "cpp", "tipython"],
+};
+/** The other calculators each target covers: the same programs run on them. */
+const TARGET_ALSO: Record<Target, string> = {
+  ce: "Also the TI-83 Premium CE and TI-82 AEP; TI-Python covers the TI-84 Evo",
+  plus: "Also the TI-83 Plus, TI-83 Plus SE and TI-84 Plus SE",
+  nspire: "CX and CX II, with Ndless for C and C++",
+};
+/**
+ * The language a project file opens in: Monaco's for its name, except where the project's language
+ * says otherwise. A .py file is TI-Python, or py2ez80 in a py2ez80 project; assembly is eZ80, or
+ * z80 in a z80 (TI-83 Plus and 84 Plus) project.
+ */
+function projectLanguageFor(name: string): string {
+  const language = languageFor(name);
+  if (language === "tipython" && config.language === "py2ez80") return "python";
+  if (language === ASM_LANG && config.language === "z80") return "z80";
+  return language;
+}
+const SETUP_SKIP_PREF = "tide-pref-setup-skipped"; // folders whose setup was put off: not asked again
+
+interface Found { targets: Map<Target, string>; languages: Map<ProjectLanguage, string> }
+
+/** The calculators and languages a folder's files point to, each with why. Reads the folder and its src/. */
+async function detectProject(entries: Entry[]): Promise<Found> {
+  const targets = new Map<Target, string>(), languages = new Map<ProjectLanguage, string>();
+  const src = entries.find((e) => e.isDir && e.name.toLowerCase() === "src");
+  const files = [...entries, ...(src ? await fs.readDir(src.path).catch(() => [] as Entry[]) : [])].filter((e) => !e.isDir);
+  const ext = (re: RegExp) => files.find((e) => re.test(e.name));
+  const makefile = entries.find((e) => !e.isDir && /^(?:gnu)?makefile$/i.test(e.name));
+  const make = makefile ? await fs.readFile(makefile.path).catch(() => "") : "";
+  if (/\b(?:nspire-gcc|nspire-g\+\+|nspire-ld|nspire-as|genzehn|make-prg|NDLESS_HOME)\b/i.test(make)) targets.set("nspire", "its Makefile uses the Ndless SDK");
+  if (/cedev/i.test(make)) targets.set("ce", "its Makefile uses the CE C toolchain");
+  const tns = ext(/\.(?:lua|tns)$/i);
+  if (tns && !targets.has("nspire")) targets.set("nspire", `it has ${tns.name}`);
+  const ez80 = ext(/\.ez80$/i);
+  if (ez80 && !targets.has("ce")) targets.set("ce", `it has ${ez80.name}`);
+  const plus = ext(/\.(?:z80|8xk)$/i);
+  if (plus) targets.set("plus", `it has ${plus.name}`);
+  const lang = (l: ProjectLanguage, re: RegExp) => { const f = ext(re); if (f) languages.set(l, `it has ${f.name}`); };
+  lang("c", /\.c$/i);
+  lang("cpp", /\.(?:cpp|cc|cxx|hpp)$/i);
+  lang("ez80", /\.(?:ez80|asm|s|src)$/i);
+  lang("z80", /\.z80$/i);
+  lang("lua", /\.lua$/i);
+  lang("tibasic", /\.8xp$/i);
+  // A .py file is TI-Python when it imports TI's modules (ti_system, ti_plotlib, ti_draw…); py2ez80
+  // has its own graphics module. Without either, it's taken as TI-Python, the calculator's own.
+  const py = ext(/\.py$/i);
+  if (py) {
+    const text = await fs.readFile(py.path).catch(() => "");
+    if (/^\s*(?:from|import)\s+ti_\w+/m.test(text)) languages.set("tipython", `${py.name} imports TI's modules`);
+    else if (/^\s*(?:from|import)\s+graphics\b/m.test(text)) languages.set("py2ez80", `${py.name} imports py2ez80's modules`);
+    else languages.set("tipython", `it has ${py.name}`);
+  }
+  // A Plus project's assembly is z80, whatever its files are named.
+  if (targets.has("plus") && languages.has("ez80") && !targets.has("ce")) {
+    languages.set("z80", languages.get("ez80")!);
+    languages.delete("ez80");
+  }
+  // A project with C++ has C headers too: it's a C++ project. Assembly helpers beside C don't make
+  // it an assembly project either.
+  if (languages.has("cpp")) languages.delete("c");
+  if (languages.has("c") || languages.has("cpp")) { languages.delete("ez80"); languages.delete("tibasic"); }
+  return { targets, languages };
+}
+
+let setupSkipped: string[] = [];
+try { setupSkipped = JSON.parse(localStorage.getItem(SETUP_SKIP_PREF) ?? "[]"); } catch { /* storage unavailable or bad JSON */ }
+
+/** On opening a folder: asks for what tide.json leaves out, as the setting says, or goes by the files. */
+async function settleProject(root: string, entries: Entry[]) {
+  const found = await detectProject(entries).catch((): Found => ({ targets: new Map(), languages: new Map() }));
+  if (project?.root !== root) return; // another folder opened meanwhile
+  const needTarget = !isTarget(config.calculator), needLanguage = !config.language;
+  if (!needTarget && !needLanguage) return;
+  const mode = settings().projectSetup;
+  const conflicts = (needTarget && found.targets.size > 1) || (needLanguage && found.languages.size > 1);
+  const ask = mode === "always" ? !setupSkipped.includes(root) : mode === "conflicts" ? conflicts : false;
+  if (ask) {
+    const answer = await askSetup(found);
+    if (project?.root !== root) return;
+    if (answer) return void (await saveSetup(answer));
+    try { localStorage.setItem(SETUP_SKIP_PREF, JSON.stringify([...new Set([...setupSkipped, root])].slice(-200))); } catch { /* storage unavailable */ }
+    setupSkipped.push(root);
+  }
+  // Not asked (or put off): one calculator the files point to is the target for now.
+  if (needTarget && found.targets.size === 1) {
+    const [only] = found.targets.keys();
+    if (only !== getTarget()) setTarget(only);
+  }
+}
+
+/** What the setup popup settles: the calculator, the language, and the prerun and postrun steps. */
+interface SetupAnswer { calculator: Target; language: ProjectLanguage; prerun: string[]; postrun: string[] }
+
+/** The kinds of step prerun and postrun take: a shell line, or one of the calculator macros. */
+type StepKind = "shell" | "key.press" | "key.type" | "program.run" | "app.open" | "wait";
+const STEP_KINDS: [StepKind, string, string][] = [
+  ["shell", "Shell command", "make test"],
+  ["key.press", "Press a key", "enter"],
+  ["key.type", "Type text", "HELLO"],
+  ["program.run", "Run a program", "MYPROG"],
+  ["app.open", "Open an app", "CabriJr"],
+  ["wait", "Wait (ms)", "500"],
+];
+/** The keys key.press knows (config.ts MACROS). */
+const STEP_KEYS = ["enter", "clear", "2nd", "alpha", "mode", "del", "math", "apps", "prgm", "vars", "stat", "on",
+  "y=", "window", "zoom", "trace", "graph", "up", "down", "left", "right"];
+
+interface Step { kind: StepKind; value: string }
+/** A tide.json step as the popup edits it: its kind and its argument (a shell step: its whole line). */
+function readStep(text: string): Step {
+  let macro: ReturnType<typeof parseMacro> = null;
+  try { macro = parseMacro(text); } catch { /* an unknown macro: shown as typed, as a shell line */ }
+  if (!macro) return { kind: "shell", value: text };
+  return { kind: macro.macro === "program.open" ? "program.run" : (macro.macro as StepKind), value: macro.arg };
+}
+/** A step back as tide.json writes it. */
+function writeStep(step: Step): string {
+  const v = step.value.trim();
+  if (step.kind === "shell") return v;
+  if (step.kind === "key.type") return `key.type(${JSON.stringify(v)})`;
+  return `${step.kind}(${v})`;
+}
+
+/** A list of steps the user builds: a row per step (its kind, its value, move and remove), and a button per kind adding one. */
+function stepList(initial: string[], empty: string): { el: HTMLElement; value: () => string[] } {
+  const list: Step[] = initial.map(readStep);
+  const rows = h("div", { className: "setup-steps" });
+  const adds = h("div", { className: "setup-adds" },
+    ...STEP_KINDS.map(([kind, label]) => h("button", {
+      type: "button", className: "setup-add", title: `Add a step: ${label.toLowerCase()}`,
+      onclick: () => {
+        list.push({ kind, value: kind === "key.press" ? "enter" : kind === "wait" ? "500" : "" });
+        render();
+        (rows.lastElementChild?.querySelector("input, select") as HTMLElement | null)?.focus();
+      },
+    }, `+ ${STEP_SHORT[kind]}`)));
+  const render = () => {
+    rows.replaceChildren(...list.map((step, i) => {
+      const [, label, example] = STEP_KINDS.find(([k]) => k === step.kind)!;
+      const field = step.kind === "key.press"
+        ? h("select", { ariaLabel: label, onchange: (e: Event) => { step.value = (e.target as HTMLSelectElement).value; } },
+            ...[...new Set([...STEP_KEYS, step.value])].filter(Boolean).map((k) => h("option", { value: k, selected: k === step.value }, k)))
+        : h("input", {
+            type: step.kind === "wait" ? "number" : "text", value: step.value, placeholder: example, spellcheck: false, ariaLabel: label,
+            min: step.kind === "wait" ? "0" : undefined,
+            oninput: (e: Event) => { step.value = (e.target as HTMLInputElement).value; },
+          });
+      const move = (by: number) => {
+        const j = i + by;
+        if (j < 0 || j >= list.length) return;
+        [list[i], list[j]] = [list[j], list[i]];
+        render();
+      };
+      return h("div", { className: "setup-step" },
+        h("span", { className: `setup-step-kind kind-${step.kind.replace(".", "-")}` }, STEP_SHORT[step.kind]),
+        field,
+        h("span", { className: "setup-step-tools" },
+          h("button", { type: "button", className: "setup-step-btn", title: "Move up", ariaLabel: "Move up", disabled: i === 0, onclick: () => move(-1) }, "↑"),
+          h("button", { type: "button", className: "setup-step-btn", title: "Move down", ariaLabel: "Move down", disabled: i === list.length - 1, onclick: () => move(1) }, "↓"),
+          h("button", { type: "button", className: "setup-step-btn remove", title: "Remove", ariaLabel: "Remove", onclick: () => { list.splice(i, 1); render(); } }, "×")));
+    }));
+    if (!list.length) rows.append(h("p", { className: "setup-empty" }, empty));
+  };
+  render();
+  return {
+    el: h("div", { className: "setup-steplist" }, rows, adds),
+    value: () => list.filter((s) => s.value.trim()).map(writeStep),
+  };
+}
+/** Each step kind's short name, on its row and its add button. */
+const STEP_SHORT: Record<StepKind, string> = {
+  shell: "Shell", "key.press": "Key", "key.type": "Type", "program.run": "Program", "app.open": "App", wait: "Wait",
+};
+
+/** What ▶ Run does for a calculator and language, before and after the user's steps (as buildForRun does it). */
+function runStages(calculator: Target, language: ProjectLanguage): { build: string; send: string; start: string } {
+  // A Makefile builds everything but TI-BASIC (usesMake).
+  const make = (!!project?.hasMakefile && language !== "tibasic") || language === "c" || language === "cpp";
+  const nspire = calculator === "nspire";
+  const build = make ? "Build with make"
+    : language === "tibasic" ? "Build the program into an .8xp"
+      : language === "z80" || language === "ez80" ? "Assemble with spasm-ng into an .8xp"
+        : nspire ? "Pack the script into a .tns with Luna"
+          : language === "tipython" ? "Nothing to build: TI-Python runs as it is"
+            : "Build";
+  const send = nspire ? "Send the .tns files to the TI-Nspire"
+    : language === "tipython" ? "Send the .py files with TI Connect CE or TI Connect Evo"
+      : calculator === "ce" && make ? "Send the .8xp and .8xv files, and the C libraries the first time"
+        : "Send the .8xp files to the calculator";
+  const start = nspire ? "Open it on the calculator: the Nspire starts a .tns from its own documents"
+    : language === "tipython" ? "Run it from the Python app"
+      : "Start the program from the home screen";
+  return { build, send, start };
+}
+
+/**
+ * The setup popup, a page at a time with Back and Next, in the order a project is set up and then
+ * run: (1) the calculator and (2) the
+ * language, showing what the folder's files point to (all of them when they point to none), with
+ * Other calculators / Other languages for when the files are wrong; then what ▶ Run does, as a
+ * timeline: (3) the user's prerun steps, between building and sending, and (4) postrun, after the
+ * program starts, each on its own page. Resolves with what was chosen, or null to put it off.
+ */
+function askSetup(found: Found): Promise<SetupAnswer | null> {
+  return new Promise((resolve) => {
+    const order: Target[] = ["ce", "plus", "nspire"];
+    let calculator: Target = isTarget(config.calculator) ? config.calculator
+      : found.targets.size ? [...found.targets.keys()][0] : getTarget();
+    let language: ProjectLanguage | null = config.language ?? null;
+    let allTargets = false, allLanguages = false;
+    const prerun = stepList(steps(config.prerun), "No steps: Run goes straight on to sending.");
+    const postrun = stepList(steps(config.postrun), "No steps: Run is done once the program starts.");
+    const dialog = h("dialog", { className: "images-dialog setup-dialog" });
+    const done = (ok: boolean) => {
+      dialog.close();
+      dialog.remove();
+      resolve(ok && language ? { calculator, language, prerun: prerun.value(), postrun: postrun.value() } : null);
+    };
+    const save = h("button", { type: "button", className: "image-btn primary", onclick: () => done(true) }, "Save to tide.json");
+    const calcRow = h("div", { className: "setup-choices" });
+    const langRow = h("div", { className: "setup-choices" });
+    const stage = (text: string) => h("div", { className: "setup-stage" }, h("span", { className: "setup-dot" }), h("span", {}, text));
+    // Each Run page shows the stages around its steps: prerun between building and sending, postrun
+    // once the program has started. (An element is in one place, so each page has its own.)
+    const stages = { build: [stage("")], send: [stage(""), stage("")], start: [stage("")] };
+    /** A choice card: pressed when it's the one chosen; "Detected" when the files point to it. */
+    const choice = (pressed: boolean, pick: () => void, name: string, note: string, why?: string) =>
+      h("button", {
+        type: "button", className: `setup-choice${why ? " detected" : ""}`, ariaPressed: String(pressed), title: why ? `Detected: ${why}` : "",
+        onclick: () => { pick(); render(); },
+      },
+        h("span", { className: "setup-choice-top" }, h("strong", {}, name), why ? h("span", { className: "setup-badge" }, "Detected") : ""),
+        note ? h("span", { className: "setup-note" }, note) : "",
+        why ? h("span", { className: "setup-why" }, why[0].toUpperCase() + why.slice(1)) : "");
+    /** The button showing the rest, or only what the files show again. */
+    const more = (open: boolean, what: string, toggle: () => void) =>
+      h("button", { type: "button", className: "setup-more", onclick: () => { toggle(); render(); } },
+        open ? "Only what the files show" : `Other ${what}…`);
+    const render = () => {
+      // Shown: what the files point to, and the one chosen; everything when the files show nothing.
+      const narrowTargets = found.targets.size > 0 && !allTargets;
+      const targets = narrowTargets ? order.filter((t) => found.targets.has(t) || t === calculator) : order;
+      const langs = LANGUAGES_FOR[calculator];
+      const foundLangs = langs.filter((l) => found.languages.has(l));
+      if (!language || !langs.includes(language)) language = foundLangs[0] ?? langs[0];
+      const narrowLangs = foundLangs.length > 0 && !allLanguages;
+      const shownLangs = narrowLangs ? langs.filter((l) => found.languages.has(l) || l === language) : langs;
+      calcRow.replaceChildren(
+        ...targets.map((t) => choice(t === calculator, () => { calculator = t; }, TARGETS[t].name, TARGET_ALSO[t], found.targets.get(t))),
+        ...(found.targets.size && (targets.length < order.length || allTargets) ? [more(allTargets, "calculators", () => { allTargets = !allTargets; })] : []));
+      langRow.replaceChildren(
+        ...shownLangs.map((l) => choice(l === language, () => { language = l; }, LANGUAGES[l], LANGUAGE_NOTES[l] ?? "", found.languages.get(l))),
+        ...(foundLangs.length && (shownLangs.length < langs.length || allLanguages) ? [more(allLanguages, "languages", () => { allLanguages = !allLanguages; })] : []));
+      const run = runStages(calculator, language);
+      for (const key of ["build", "send", "start"] as const)
+        for (const el of stages[key]) el.lastElementChild!.textContent = run[key];
+      save.disabled = !language;
+    };
+    render();
+    const several = found.targets.size > 1 || found.languages.size > 1;
+    const none = !found.targets.size && !found.languages.size;
+    /** A page: its title and what it's for (the progress above numbers it), then its choices. */
+    const section = (_n: number, title: string, hint: string, ...body: HTMLElement[]) =>
+      h("section", { className: "setup-section" },
+        h("div", { className: "setup-head" }, h("div", {}, h("h3", {}, title), h("p", {}, hint))),
+        ...body);
+    const steplane = (title: string, hint: string, list: HTMLElement) =>
+      h("div", { className: "setup-lane" }, h("div", { className: "setup-lane-head" }, h("strong", {}, title), h("span", {}, hint)), list);
+    // One page at a time, Back and Next between them, and Save on the last: the calculator first,
+    // since the languages shown depend on it, then the language, then Run's prerun and postrun steps.
+    const pages: [string, HTMLElement][] = [
+      ["Calculator", section(1, "Calculator", "What the project's programs run on.", calcRow)],
+      ["Language", section(2, "Language", "What it's written in. Its files open in this language.", langRow)],
+      ["Prerun", section(3, "Prerun", "Steps ▶ Run takes after building and before sending: tests, copying files, getting the calculator ready. If one fails, nothing is sent.",
+        h("div", { className: "setup-timeline" },
+          stages.build[0],
+          steplane("Your prerun steps", "after building, before sending", prerun.el),
+          stages.send[0]))],
+      ["Postrun", section(4, "Postrun", "Steps ▶ Run takes once the program is running: pressing its keys, typing into it, waiting.",
+        h("div", { className: "setup-timeline" },
+          stages.send[1],
+          stages.start[0],
+          steplane("Your postrun steps", "once the program is running", postrun.el)))],
+    ];
+    let page = 0;
+    const body = h("div", { className: "images-body setup-body" });
+    const progress = h("ol", { className: "setup-progress" });
+    const back = h("button", { type: "button", className: "image-btn", onclick: () => go(page - 1) }, "← Back");
+    const next = h("button", { type: "button", className: "image-btn primary", onclick: () => go(page + 1) }, "Next →");
+    const summary = h("span", { className: "hint setup-summary" });
+    const go = (to: number) => {
+      page = Math.max(0, Math.min(pages.length - 1, to));
+      body.replaceChildren(pages[page][1]);
+      body.scrollTop = 0;
+      progress.replaceChildren(...pages.map(([name], i) =>
+        h("li", { className: i === page ? "now" : i < page ? "done" : "" },
+          // A page already passed can be gone back to; ahead, only through Next.
+          h("button", { type: "button", disabled: i > page, onclick: () => go(i), ariaCurrent: i === page ? "step" : undefined },
+            h("span", { className: "setup-progress-num" }, i < page ? "✓" : String(i + 1)), name))));
+      back.hidden = page === 0;
+      next.hidden = page === pages.length - 1;
+      save.hidden = page !== pages.length - 1;
+      // What's chosen so far, on the pages after it.
+      summary.textContent = page === 0 ? "Saved in .tide/tide.json."
+        : `${TARGETS[calculator].name}${page > 1 && language ? ` · ${LANGUAGES[language]}` : ""}`;
+      (body.querySelector('[aria-pressed="true"], input, select') as HTMLElement | null)?.focus({ preventScroll: true });
+    };
+    dialog.append(
+      h("header", { className: "images-head" },
+        h("div", {}, h("h2", {}, `Set up ${project?.name ?? "this folder"}`),
+          h("p", { className: "hint" }, several
+            ? "Its files point more than one way: choose what it is."
+            : none
+              ? "Nothing in it shows what it is yet: choose its calculator and language."
+              : "Here's what its files show. Check it, and add any steps Run should take."),
+          progress),
+        h("button", { type: "button", className: "images-close", title: "Not now (Esc)", ariaLabel: "Close", onclick: () => done(false) }, "×")),
+      body,
+      h("footer", { className: "images-foot" },
+        summary,
+        h("button", { type: "button", className: "image-btn setup-later", onclick: () => done(false) }, "Not now"),
+        back, next, save),
+    );
+    go(0);
+    dialog.addEventListener("cancel", (e) => { e.preventDefault(); done(false); });
+    document.body.append(dialog);
+    dialog.showModal();
+  });
+}
+
+/** Opens the setup popup for the open folder, from Settings → Project. */
+async function setUpProject() {
+  if (!project) return setMessage("Open a folder to set it up.");
+  const root = project.root;
+  const entries = await fs.readDir(root);
+  const answer = await askSetup(await detectProject(entries));
+  if (answer && project?.root === root) await saveSetup(answer);
+}
+
+/**
+ * Sets keys in the project's tide.json (creating it if there isn't one) and loads it again. Only
+ * a key at the start of a line is replaced, never one in a // comment; a new one goes first.
+ */
+async function setConfigKeys(values: Record<string, string | string[]>) {
+  const path = configPath();
+  if (!project || !path) throw new Error("no folder is open");
+  let text = (await configExists())
+    ? await fs.readFile(path)
+    : "{\n}\n";
+  for (const [name, raw] of Object.entries(values)) {
+    const value = Array.isArray(raw) ? `[${raw.map((v) => JSON.stringify(v)).join(", ")}]` : JSON.stringify(raw);
+    // The key's value: a string, or a list of strings (on one line or several).
+    const key = new RegExp(`^(\\s*)"${name}"\\s*:\\s*(?:"(?:[^"\\\\]|\\\\.)*"|\\[(?:\\s|"(?:[^"\\\\]|\\\\.)*"|,)*\\])`, "m");
+    text = key.test(text)
+      ? text.replace(key, (_, indent: string) => `${indent}"${name}": ${value}`)
+      : text.replace(/\{(\s*)(\}?)/, (_, space: string, close: string) =>
+          close ? `{\n  "${name}": ${value}\n}` : `{${space}"${name}": ${value},${space}`);
+  }
+  await fs.writeFile(path, text);
+  await loadConfig();
+}
+
+/**
+ * A whole tide.json for a new project, from its calculator and language: how it builds, its prerun
+ * and postrun steps, what Run sends, the libraries, where it runs and its scripts,
+ * each set as that kind of project needs, with a comment saying what the rest are for.
+ */
+function starterConfig({ calculator, language, prerun, postrun }: SetupAnswer, hasMakefile: boolean): string {
+  const compiled = language === "c" || language === "cpp" || ((language === "ez80" || language === "py2ez80") && hasMakefile);
+  const make = compiled || (hasMakefile && calculator === "nspire");
+  const tns = calculator === "nspire";
+  const send =
+    tns ? (make ? ["bin/*.tns", "*.tns"] : ["*.tns"])
+      : make ? ["bin/*.8xp", "bin/*.8xv"]
+        : language === "tipython" ? [] : ["*.8xp"];
+  const lines: string[] = [
+    `  "calculator": "${calculator}",`,
+    `  "language": "${language}",`,
+    ...(make ? [`  "build": "make",`] : []),
+    // The program Run starts: "" sends without starting one; leave it out to start the first sent.
+    ...(language === "tipython" ? [`  "program": "",`] : []),
+    `  "prerun": ${JSON.stringify(prerun).replace(/","/g, '", "')},`,
+    `  "postrun": ${JSON.stringify(postrun).replace(/","/g, '", "')},`,
+    `  "send": [${send.map((p) => JSON.stringify(p)).join(", ")}],`,
+    // The CE C libraries are for C and C++ on the CE.
+    `  "libraries": ${calculator === "ce" && compiled},`,
+    ...(calculator === "ce" ? [`  "runIn": "calculator",`] : []),
+    `  "scripts": {${make ? `\n    "clean": "make clean"\n  ` : ""}}`,
+  ];
+  return [
+    "{",
+    "  // How TIde builds and runs this project. Hover a name for help, or press Ctrl+Space for options.",
+    '  // "prerun" and "postrun" take shell lines and calculator steps such as "key.press(enter)";',
+    '  // "program" is the program Run starts, "link": { "via": "usb" } the real calculator\'s cable,',
+    '  // and "editor" settings used instead of yours while the project is open.',
+    ...lines,
+    "}",
+    "",
+  ].join("\n");
+}
+
+async function saveSetup(answer: SetupAnswer) {
+  try {
+    const path = configPath();
+    // A new project gets a whole tide.json for its kind; an existing one only what the popup sets.
+    if (project && path && !(await configExists())) {
+      await fs.writeFile(path, starterConfig(answer, project.hasMakefile));
+      await loadConfig();
+    } else {
+      await setConfigKeys({ calculator: answer.calculator, language: answer.language, prerun: answer.prerun, postrun: answer.postrun });
+    }
+    setMessage(`${project?.name}: ${LANGUAGES[answer.language]} for the ${TARGETS[answer.calculator].name}, in tide.json.`);
+  } catch (err) {
+    setTarget(answer.calculator);
+    setMessage(`Target: ${TARGETS[answer.calculator].name}, for now: tide.json couldn't be changed (${err instanceof Error ? err.message : err}).`);
+  }
+}
+
+/** Sets the target. In a project, it's the project's: it goes in tide.json as "calculator". */
+async function chooseTarget(target: Target) {
+  if (!project) return setTarget(target);
+  try {
+    await setConfigKeys({ calculator: target });
+    setMessage(`This project is for the ${TARGETS[target].name} now (tide.json's "calculator").`);
+  } catch (err) {
+    setTarget(target);
+    setMessage(`Target: ${TARGETS[target].name}, for now: tide.json couldn't be changed (${err instanceof Error ? err.message : err}).`);
+  }
+}
+
 async function loadProject(root: string, reveal = true) {
   const entries = await fs.readDir(root);
   dirCache.clear();
@@ -1968,6 +2532,8 @@ async function loadProject(root: string, reveal = true) {
     /* storage unavailable */
   }
   await loadConfig(entries.some((e) => e.isDir && e.name === CONFIG_DIR));
+  // What tide.json leaves out (its calculator, its language), the setup popup asks, or the files show.
+  void settleProject(root, entries);
   if (reveal) showPane("files");
   renderTree();
   applyEditorMode(); // the docs and Build button follow the project type
@@ -2352,6 +2918,7 @@ function catalogLang(): DocLangId | null {
   )?.language;
   if (!language || language === "tibasic") return "tibasic";
   if (language === "python") return "python";
+  if (language === "tipython") return "tipython";
   if (language === ASM_LANG) return "ez80";
   // The CE toolchain builds C++ too. A Makefile marks the whole folder as a C project.
   if (language === "c" || language === "cpp" || project?.hasMakefile)
@@ -2369,6 +2936,8 @@ function catalogGroups(): {
       return tiCatalog(getTarget());
     case "python":
       return PY_CATALOG;
+    case "tipython":
+      return TI_PYTHON_CATALOG;
     case "ez80":
       return ASM_CATALOG;
     case "c":
@@ -2533,8 +3102,6 @@ function applyEditorMode() {
   els.gutter.hidden = !basic;
   els.gutter.textContent = showNumbers ? "Gutter: line numbers" : 'Gutter: ":"';
   els.gutter.setAttribute("aria-pressed", String(showNumbers));
-  els.target.hidden = !basic;
-  els.target.textContent = `Target: ${TARGETS[getTarget()].label}`;
   const make = usesMake(),
     asm = assemblesActive(),
     script = nspireScript();
@@ -2588,6 +3155,7 @@ const KIND_LABEL: Record<DocLangId, string> = {
   tibasic: "TI-BASIC",
   c: "C",
   python: "py2ez80",
+  tipython: "TI-Python",
   ez80: "eZ80 assembly",
 };
 
@@ -3798,16 +4366,11 @@ onSettingsChange((s) => {
   applyEditorMode();
   emit("settings", s);
 });
-els.target.addEventListener("click", () =>
-  setTarget(getTarget() === "ce" ? "plus" : "ce"),
-);
 onTargetChange(() => {
   applyEditorMode();
   refresh();
   void checkPrograms();
-  setMessage(
-    `Target: TI-84 ${TARGETS[getTarget()].label === "CE" ? "Plus CE" : "Plus"}`,
-  );
+  setMessage(`Target: ${TARGETS[getTarget()].name}`);
 });
 els.find.addEventListener("keydown", (e) => {
   if (e.key !== "Enter") return;

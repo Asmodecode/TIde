@@ -90,13 +90,36 @@ fn pump(app: AppHandle, id: u32, mut from: impl Read + Send + 'static, err: bool
     })
 }
 
-/// Starts `line` in the shell, in `dir`. Output and the exit come as events with this `id`.
+/// Adds `env` to a command's environment. With NDLESS_HOME in it (and no PATH of its own), the Ndless
+/// SDK's toolchain folders, <NDLESS_HOME>/bin and <NDLESS_HOME>/ndless-sdk/bin where they exist, go
+/// first on PATH, so Ndless makefiles find nspire-gcc, nspire-ld, genzehn and make-prg.
+pub(crate) fn add_env(cmd: &mut Command, env: Option<HashMap<String, String>>) {
+    let Some(env) = env else { return };
+    if let (Some(home), false) = (env.get("NDLESS_HOME"), env.contains_key("PATH")) {
+        let sep = if cfg!(windows) { ";" } else { ":" };
+        let mut bins: Vec<String> = ["bin", "ndless-sdk/bin"]
+            .iter()
+            .map(|sub| std::path::Path::new(home).join(sub))
+            .filter(|p| p.is_dir())
+            .map(|p| p.to_string_lossy().into_owned())
+            .collect();
+        if let (false, Ok(path)) = (bins.is_empty(), std::env::var("PATH")) {
+            bins.push(path);
+            cmd.env("PATH", bins.join(sep));
+        }
+    }
+    cmd.envs(env);
+}
+
+/// Starts `line` in the shell, in `dir`, with `env` added to its environment. Output and the exit
+/// come as events with this `id`.
 #[tauri::command]
-pub fn shell_run(app: AppHandle, shells: State<Shells>, id: u32, dir: String, line: String) -> Result<(), String> {
+pub fn shell_run(app: AppHandle, shells: State<Shells>, id: u32, dir: String, line: String, env: Option<HashMap<String, String>>) -> Result<(), String> {
     let mut cmd = shell_command(&line);
     cmd.current_dir(&dir).stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(Stdio::piped());
     // Tools that color their output when they see a terminal keep it plain, but still show progress.
     cmd.env("TERM", "dumb").env("CLICOLOR", "0");
+    add_env(&mut cmd, env);
     let mut child = cmd.spawn().map_err(|e| format!("Couldn't start the shell: {e}"))?;
     let stdout = child.stdout.take().unwrap();
     let stderr = child.stderr.take().unwrap();
@@ -169,6 +192,21 @@ mod tests {
         assert_eq!(split_utf8(&text[..text.len() - 1]), text.len() - 4); // half an emoji held back
         assert_eq!(split_utf8(&text[..2]), 1); // half an é held back
         assert_eq!(split_utf8(b"plain"), 5);
+    }
+
+    #[test]
+    fn the_shell_gets_its_environment() {
+        #[cfg(windows)]
+        let line = "echo first && echo %TIDE_TEST_ENV%";
+        #[cfg(not(windows))]
+        let line = "echo first && echo \"$TIDE_TEST_ENV\"";
+        let mut cmd = shell_command(line);
+        let mut env = HashMap::new();
+        env.insert("TIDE_TEST_ENV".to_string(), "from-tide".to_string());
+        add_env(&mut cmd, Some(env));
+        let out = cmd.output().unwrap();
+        let text = String::from_utf8_lossy(&out.stdout);
+        assert!(text.contains("first") && text.contains("from-tide"), "{text}");
     }
 
     #[test]

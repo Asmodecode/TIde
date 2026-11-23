@@ -6,8 +6,9 @@ import { TI_CATEGORIES } from "./ti-docs";
 import { C_LIBRARY, C_SNIPPETS } from "./c-support";
 import { PY_LIBRARY, PY_SNIPPETS } from "./py2ez80-support";
 import { ASM_LIBRARY, ASM_SNIPPETS } from "./asm-support";
+import { TI_PYTHON_SNIPPETS } from "./tipython-support";
 
-export type DocLangId = "tibasic" | "c" | "python" | "ez80";
+export type DocLangId = "tibasic" | "c" | "python" | "tipython" | "ez80";
 interface DocEntry { name: string; usage: string[]; doc: string; params?: Command["params"]; tags?: string[] }
 interface DocGroup { group: string; entries: DocEntry[] }
 interface DocLang { id: DocLangId; label: string; intro: string; groups: DocGroup[] }
@@ -49,6 +50,20 @@ export const DOCS: DocLang[] = [
     id: "python", label: "py2ez80",
     intro: "The Python subset that py2ez80 turns into C: its built-ins and the graphics, math and random modules.",
     groups: [snippets(PY_SNIPPETS), ...PY_LIBRARY.map(g => ({ group: g.group, entries: g.entries.map(e => ({ name: e.name, usage: [e.sig], doc: e.doc })) }))],
+  },
+  {
+    id: "tipython", label: "TI-Python",
+    intro: "Python programs for the TI-84 Evo and TI-84 Plus CE Python. These are ordinary .py files; transfer them with TI Connect Evo or TI Connect CE.",
+    groups: [
+      snippets(TI_PYTHON_SNIPPETS),
+      { group: "TI modules", entries: [
+        { name: "ti_system", usage: ["import ti_system"], doc: "TI calculator system and device functions." },
+        { name: "ti_draw", usage: ["import ti_draw"], doc: "Drawing functions for the calculator screen." },
+        { name: "ti_plotlib", usage: ["import ti_plotlib"], doc: "Plotting and graphing functions." },
+        { name: "ti_hub_module", usage: ["import ti_hub_module"], doc: "TI-Innovator Hub functions." },
+        { name: "ti_rover", usage: ["import ti_rover"], doc: "TI-Innovator Rover functions." },
+      ] },
+    ],
   },
   {
     id: "ez80", label: "eZ80 assembly",

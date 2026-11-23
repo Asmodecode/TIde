@@ -1,8 +1,8 @@
 // Files for the calculator panel: three emulator cores compiled to WebAssembly and built into
 // TIde (see emulator/: each has its build.sh and SOURCE.txt). CEmu's (WebCEmu, GPLv3) runs the
 // TI-84 Plus CE, Wabbitemu's (WabbitEmu, GPLv2+) the TI-73, 81, 82, 83, 83 Plus, 84 Plus, 85 and
-// 86, and Firebird's (firebird, GPLv3) the TI-Nspire CX. Then the user's own images: CE.rom, any
-// number of other ROMs in roms/, and the Nspire's boot1.img and flash.img in nspire/, all kept in
+// 86, and Firebird's (firebird, GPLv3) the TI-Nspire CX. Then the user's own images: any number of
+// CE ROMs in ce/ (a TI-84 Plus CE's, a TI-83 Premium CE's...), any number of other ROMs in roms/, and the Nspire's boot1.img and flash.img in nspire/, all kept in
 // TIde's data folder. The page reads them all as bytes and runs the cores itself.
 use serde::Serialize;
 use std::fs;
@@ -47,8 +47,8 @@ fn home(app: &tauri::AppHandle) -> Result<PathBuf, String> {
 
 #[derive(Serialize)]
 pub struct CalcFiles {
-    /// The TI-84 Plus CE ROM.
-    rom: bool,
+    /// The CE-family ROMs (TI-84 Plus CE, TI-83 Premium CE, TI-82 AEP), by file name.
+    ces: Vec<String>,
     /// Other models' ROMs, by file name.
     roms: Vec<String>,
     /// The Nspire's boot1 and flash images.
@@ -59,6 +59,9 @@ pub struct CalcFiles {
 pub struct NspireFiles {
     boot1: bool,
     flash: bool,
+    /// The stored images' sizes in bytes, for the setup panel to show.
+    boot1_size: Option<u64>,
+    flash_size: Option<u64>,
 }
 
 /// The Nspire images' folder in TIde's data folder.
@@ -81,11 +84,9 @@ fn rom_name(name: &str) -> Result<&str, String> {
     }
 }
 
-/// Which ROMs and images are in place.
-#[tauri::command]
-pub fn calc_files(app: tauri::AppHandle) -> Result<CalcFiles, String> {
-    let dir = home(&app)?;
-    let mut roms: Vec<String> = fs::read_dir(dir.join("roms"))
+/// The ROMs in a folder, by name.
+fn list_roms(dir: &std::path::Path) -> Vec<String> {
+    let mut roms: Vec<String> = fs::read_dir(dir)
         .map(|entries| {
             entries
                 .flatten()
@@ -96,13 +97,67 @@ pub fn calc_files(app: tauri::AppHandle) -> Result<CalcFiles, String> {
         })
         .unwrap_or_default();
     roms.sort_by_key(|n| n.to_lowercase());
+    roms
+}
+
+/// A name for a ROM in `dir`: its own, unless a different ROM already has it, then "name (2).rom"
+/// and on, so several ROMs of the same calculator (often all named alike) are kept side by side.
+/// The same ROM again keeps its name.
+fn stored_name(dir: &std::path::Path, name: &str, bytes: &[u8]) -> String {
+    let (stem, ext) = match name.rfind('.') {
+        Some(i) if i > 0 => (&name[..i], &name[i..]),
+        _ => (name, ""),
+    };
+    let mut n = 1;
+    loop {
+        let candidate = if n == 1 {
+            name.to_string()
+        } else {
+            format!("{stem} ({n}){ext}")
+        };
+        match fs::read(dir.join(&candidate)) {
+            Ok(existing) if existing != bytes => n += 1,
+            _ => return candidate,
+        }
+    }
+}
+
+/// A file's name made safe for a ROM folder.
+fn clean_name(path: &str) -> Result<String, String> {
+    let file = std::path::Path::new(path)
+        .file_name()
+        .map(|n| n.to_string_lossy().into_owned())
+        .unwrap_or_default();
+    let clean: String = file
+        .chars()
+        .map(|c| {
+            if c.is_alphanumeric() || " ._-+()[]".contains(c) {
+                c
+            } else {
+                '_'
+            }
+        })
+        .collect();
+    Ok(rom_name(clean.trim_start_matches('.'))?.to_string())
+}
+
+/// Which ROMs and images are in place. A CE.rom from before TIde kept several moves into ce/.
+#[tauri::command]
+pub fn calc_files(app: tauri::AppHandle) -> Result<CalcFiles, String> {
+    let dir = home(&app)?;
+    if dir.join("CE.rom").is_file() && !dir.join("ce").join("CE.rom").exists() {
+        fs::create_dir_all(dir.join("ce")).map_err(|e| e.to_string())?;
+        fs::rename(dir.join("CE.rom"), dir.join("ce").join("CE.rom")).map_err(|e| e.to_string())?;
+    }
     let nspire = nspire_dir(&app)?;
     Ok(CalcFiles {
-        rom: dir.join("CE.rom").is_file(),
-        roms,
+        ces: list_roms(&dir.join("ce")),
+        roms: list_roms(&dir.join("roms")),
         nspire: NspireFiles {
             boot1: nspire.join("boot1.img").is_file(),
             flash: nspire.join("flash.img").is_file(),
+            boot1_size: fs::metadata(nspire.join("boot1.img")).ok().map(|m| m.len()),
+            flash_size: fs::metadata(nspire.join("flash.img")).ok().map(|m| m.len()),
         },
     })
 }
@@ -112,19 +167,23 @@ fn is_nspire_flash(size: u64) -> bool {
     size == 33 * 1024 * 1024 || size == 132 * 1024 * 1024
 }
 
-/// Copies the user's ROM into TIde's data folder. A 4 MB ROM is a TI-84 Plus CE's and becomes
-/// CE.rom; a 33 or 132 MB image is a Nspire flash and becomes nspire/flash.img; a 512 KB file
+/// Copies the user's ROM into TIde's data folder. A 4 MB ROM is a CE's (TI-84 Plus CE, TI-83
+/// Premium CE or TI-82 AEP) and goes in ce/ under its own name; a 33 or 132 MB image is a Nspire flash and becomes nspire/flash.img; a 512 KB file
 /// named like a boot1 is the Nspire's boot image and becomes nspire/boot1.img; anything else
 /// (16 KB to 4 MB: a TI-73, 81, 82, 83, 83 Plus, 84 Plus, 85 or 86 ROM, or a Wabbitemu .sav) goes
-/// in roms/ under its own name. Returns "ce", "nspire", or "rom:" and the stored name.
+/// in roms/ under its own name. A different ROM with the same name gets "name (2)" and on.
+/// Returns "ce:" or "rom:" and the stored name, or "nspire".
 #[tauri::command]
 pub fn calc_set_rom(app: tauri::AppHandle, path: String) -> Result<String, String> {
     let size = fs::metadata(&path).map_err(|e| e.to_string())?.len();
     let dir = home(&app)?;
     if (0x40_0000..=0x40_0100).contains(&size) {
-        fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
-        fs::copy(&path, dir.join("CE.rom")).map_err(|e| e.to_string())?;
-        return Ok("ce".into());
+        let bytes = fs::read(&path).map_err(|e| e.to_string())?;
+        let ce = dir.join("ce");
+        fs::create_dir_all(&ce).map_err(|e| e.to_string())?;
+        let name = stored_name(&ce, &clean_name(&path)?, &bytes);
+        fs::write(ce.join(&name), &bytes).map_err(|e| e.to_string())?;
+        return Ok(format!("ce:{name}"));
     }
     let file = std::path::Path::new(&path)
         .file_name()
@@ -147,20 +206,38 @@ pub fn calc_set_rom(app: tauri::AppHandle, path: String) -> Result<String, Strin
             "That file is {size} bytes, which isn't the size of a calculator ROM or Nspire image."
         ));
     }
-    let clean: String = file
-        .chars()
-        .map(|c| {
-            if c.is_alphanumeric() || " ._-+()[]".contains(c) {
-                c
-            } else {
-                '_'
-            }
-        })
-        .collect();
-    let name = rom_name(clean.trim_start_matches('.'))?.to_string();
-    fs::create_dir_all(dir.join("roms")).map_err(|e| e.to_string())?;
-    fs::copy(&path, dir.join("roms").join(&name)).map_err(|e| e.to_string())?;
+    let bytes = fs::read(&path).map_err(|e| e.to_string())?;
+    let roms = dir.join("roms");
+    fs::create_dir_all(&roms).map_err(|e| e.to_string())?;
+    let name = stored_name(&roms, &clean_name(&path)?, &bytes);
+    fs::write(roms.join(&name), &bytes).map_err(|e| e.to_string())?;
     Ok(format!("rom:{name}"))
+}
+
+/// Stores one of the Nspire's images in nspire/, after checking its size: "boot1" (512 KB) or "flash"
+/// (33 or 132 MB). Returns its size. The setup panel adds them one at a time.
+#[tauri::command]
+pub fn calc_set_nspire_image(app: tauri::AppHandle, part: String, path: String) -> Result<u64, String> {
+    let size = fs::metadata(&path).map_err(|e| e.to_string())?.len();
+    let target = match part.as_str() {
+        "boot1" if size == 0x8_0000 => "boot1.img",
+        "boot1" => {
+            return Err(format!(
+                "That file is {size} bytes; a TI-Nspire boot1 image is 524,288 bytes (512 KB)."
+            ))
+        }
+        "flash" if is_nspire_flash(size) => "flash.img",
+        "flash" => {
+            return Err(format!(
+                "That file is {size} bytes; a TI-Nspire flash image is 138,412,032 (132 MB, CX and CX II) or 34,603,008 (33 MB, older models). An OS file (.tcc, .tco, .tcc2) isn't a flash image."
+            ))
+        }
+        _ => return Err(format!("\"{part}\" isn't boot1 or flash.")),
+    };
+    let dir = nspire_dir(&app)?;
+    fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+    fs::copy(&path, dir.join(target)).map_err(|e| e.to_string())?;
+    Ok(size)
 }
 
 /// Stores the Nspire's boot1 (512 KB) and flash (33 or 132 MB) images in nspire/.
@@ -185,10 +262,14 @@ pub fn calc_set_nspire(app: tauri::AppHandle, boot1: String, flash: String) -> R
     Ok(())
 }
 
-/// Removes a stored ROM from roms/.
+/// Removes a stored ROM: "ce/" and a CE ROM's name, or another model's ROM's name in roms/.
 #[tauri::command]
 pub fn calc_remove_rom(app: tauri::AppHandle, name: String) -> Result<(), String> {
-    fs::remove_file(home(&app)?.join("roms").join(rom_name(&name)?)).map_err(|e| e.to_string())
+    let path = match name.strip_prefix("ce/") {
+        Some(ce) => home(&app)?.join("ce").join(rom_name(ce)?),
+        None => home(&app)?.join("roms").join(rom_name(&name)?),
+    };
+    fs::remove_file(path).map_err(|e| e.to_string())
 }
 
 /// Removes the stored Nspire images.
@@ -197,25 +278,29 @@ pub fn calc_remove_nspire(app: tauri::AppHandle) -> Result<(), String> {
     fs::remove_dir_all(nspire_dir(&app)?).map_err(|e| e.to_string())
 }
 
-/// Writes a chunk of the Nspire's flash image back into nspire/flash.img, at `offset`, after the
-/// emulator ran (so files sent to the calculator stay for the next session). The page sends the
-/// image in chunks because invoke arguments are JSON.
+/// Writes a piece of the Nspire's flash image back into nspire/flash.img after the emulator ran, so
+/// files sent to the calculator stay for the next session. The piece is the request's raw body (no
+/// JSON), at the offset in its `x-tide-offset` header; `x-tide-total` is the image's whole size, and
+/// the file is cut to it, so a smaller image never keeps the end of a bigger one.
 #[tauri::command]
-pub fn calc_nspire_flash_write(
-    app: tauri::AppHandle,
-    offset: u64,
-    bytes: Vec<u8>,
-) -> Result<(), String> {
+pub fn calc_nspire_flash_write(app: tauri::AppHandle, request: tauri::ipc::Request<'_>) -> Result<(), String> {
     use std::io::{Seek, SeekFrom, Write};
+    let header = |name: &str| -> Result<u64, String> {
+        request.headers().get(name).and_then(|v| v.to_str().ok()).and_then(|v| v.parse().ok()).ok_or(format!("No {name}."))
+    };
+    let (offset, total) = (header("x-tide-offset")?, header("x-tide-total")?);
+    let tauri::ipc::InvokeBody::Raw(bytes) = request.body() else { return Err("No flash data.".into()) };
+    if !is_nspire_flash(total) {
+        return Err(format!("A {total}-byte image isn't a TI-Nspire flash image."));
+    }
     let path = nspire_dir(&app)?.join("flash.img");
     fs::create_dir_all(path.parent().unwrap()).map_err(|e| e.to_string())?;
-    let mut f = fs::OpenOptions::new()
-        .create(true)
-        .write(true)
-        .open(&path)
-        .map_err(|e| e.to_string())?;
+    let mut f = fs::OpenOptions::new().create(true).truncate(false).write(true).open(&path).map_err(|e| e.to_string())?;
     f.seek(SeekFrom::Start(offset)).map_err(|e| e.to_string())?;
-    f.write_all(&bytes).map_err(|e| e.to_string())?;
+    f.write_all(bytes).map_err(|e| e.to_string())?;
+    if offset + bytes.len() as u64 >= total {
+        f.set_len(total).map_err(|e| e.to_string())?;
+    }
     Ok(())
 }
 
@@ -279,8 +364,8 @@ pub fn find_clibs(project_root: Option<String>) -> Option<String> {
     })
 }
 
-/// Reads one of the stored files for the page: a core's script or WebAssembly, CE.rom,
-/// "roms/" and a stored ROM's name, or "nspire/boot1.img" / "nspire/flash.img".
+/// Reads one of the stored files for the page: a core's script or WebAssembly, "ce/" and a CE
+/// ROM's name, "roms/" and another stored ROM's name, or "nspire/boot1.img" / "nspire/flash.img".
 #[tauri::command]
 pub fn calc_read(app: tauri::AppHandle, name: String) -> Result<tauri::ipc::Response, String> {
     if let Some((_, bytes)) = CORES.iter().find(|(file, _)| *file == name) {
@@ -294,8 +379,8 @@ pub fn calc_read(app: tauri::AppHandle, name: String) -> Result<tauri::ipc::Resp
             return Err(format!("{name} isn't a calculator file."));
         }
         nspire_dir(&app)?.join(image)
-    } else if name == "CE.rom" {
-        dir.join(&name)
+    } else if let Some(rom) = name.strip_prefix("ce/") {
+        dir.join("ce").join(rom_name(rom)?)
     } else {
         return Err(format!("{name} isn't a calculator file."));
     };
@@ -336,6 +421,19 @@ mod tests {
         for bad in ["", "../CE.rom", "a/b.rom", "a\\b.rom", ".hidden", "x:y.rom"] {
             assert!(rom_name(bad).is_err(), "{bad} should be refused");
         }
+    }
+
+    #[test]
+    fn a_different_rom_with_the_same_name_is_kept_beside_it() {
+        let dir = std::env::temp_dir().join(format!("tide-roms-{}", std::process::id()));
+        fs::create_dir_all(&dir).unwrap();
+        assert_eq!(stored_name(&dir, "CE.rom", b"a"), "CE.rom");
+        fs::write(dir.join("CE.rom"), b"a").unwrap();
+        assert_eq!(stored_name(&dir, "CE.rom", b"a"), "CE.rom");
+        assert_eq!(stored_name(&dir, "CE.rom", b"b"), "CE (2).rom");
+        fs::write(dir.join("CE (2).rom"), b"b").unwrap();
+        assert_eq!(stored_name(&dir, "CE.rom", b"c"), "CE (3).rom");
+        fs::remove_dir_all(&dir).unwrap();
     }
 
     #[test]

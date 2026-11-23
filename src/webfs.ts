@@ -289,15 +289,70 @@ export const webFs = {
 const CORES = import.meta.glob("/emulator/*/dist/*.{js,wasm}", { query: "?url", import: "default", eager: true }) as Record<string, string>;
 const coreUrl = (name: string) => Object.entries(CORES).find(([path]) => path.endsWith(`/${name}`))?.[1];
 
+/** The TI-Nspire's flash image sizes: 132 MB (CX, CX II) or 33 MB (older models), as the desktop app checks. */
+const isNspireFlash = (size: number) => size === 132 * 1024 * 1024 || size === 33 * 1024 * 1024;
+const NSPIRE_BOOT1 = 512 * 1024;
+
+/** Writes a file in the calculator's storage, replacing what was there. */
+async function writeCalcFile(dir: string[], name: string, bytes: Uint8Array) {
+  const w = await (await (await opfsDir("calculator", ...dir)).getFileHandle(name, { create: true })).createWritable();
+  await w.write(bytes as BlobPart);
+  await w.close();
+}
+
+/** The files in one of the calculator's folders, by name. */
+async function listCalcDir(dir: string): Promise<string[]> {
+  const names: string[] = [];
+  for await (const [name, h] of (await opfsDir("calculator", dir)) as unknown as AsyncIterable<[string, FileSystemHandle]>) if (h.kind === "file") names.push(name);
+  return names.sort((a, b) => a.localeCompare(b, undefined, { sensitivity: "base" }));
+}
+
+/**
+ * A name for a ROM in a folder: its own, unless a different ROM already has it, then "name (2).rom"
+ * and on, so several ROMs of the same calculator (often all named alike) are kept side by side.
+ */
+async function storedName(dir: string, name: string, bytes: Uint8Array): Promise<string> {
+  const folder = await opfsDir("calculator", dir);
+  const dot = name.lastIndexOf(".");
+  const [stem, ext] = dot > 0 ? [name.slice(0, dot), name.slice(dot)] : [name, ""];
+  for (let n = 1; ; n++) {
+    const candidate = n === 1 ? name : `${stem} (${n})${ext}`;
+    const existing = await folder.getFileHandle(candidate).then(h => h.getFile()).then(f => f.arrayBuffer().then(b => new Uint8Array(b)), () => null);
+    if (!existing || (existing.length === bytes.length && existing.every((b, i) => b === bytes[i]))) return candidate;
+  }
+}
+
 export const webCalc = {
-  async files(): Promise<{ rom: boolean; roms: string[] }> {
+  async files(): Promise<{ ces: string[]; roms: string[]; nspire: { boot1: boolean; flash: boolean; boot1_size: number | null; flash_size: number | null } }> {
     const dir = await opfsDir("calculator");
-    const romsDir = await opfsDir("calculator", "roms");
-    const has = await dir.getFileHandle("CE.rom").then(() => true, () => false);
-    const roms: string[] = [];
-    for await (const [name, h] of romsDir as unknown as AsyncIterable<[string, FileSystemHandle]>) if (h.kind === "file") roms.push(name);
-    return { rom: has, roms: roms.sort((a, b) => a.localeCompare(b, undefined, { sensitivity: "base" })) };
+    const nspireDir = await opfsDir("calculator", "nspire");
+    // A CE.rom from before TIde kept several moves into ce/.
+    const legacy = await dir.getFileHandle("CE.rom").then(h => h.getFile(), () => null);
+    if (legacy && !(await listCalcDir("ce")).includes("CE.rom")) {
+      await writeCalcFile(["ce"], "CE.rom", new Uint8Array(await legacy.arrayBuffer()));
+      await dir.removeEntry("CE.rom");
+    }
+    const size = (name: string) => nspireDir.getFileHandle(name).then(h => h.getFile()).then(f => f.size, () => null);
+    const [boot1, flash] = await Promise.all([size("boot1.img"), size("flash.img")]);
+    return {
+      ces: await listCalcDir("ce"),
+      roms: await listCalcDir("roms"),
+      nspire: { boot1: boot1 !== null, flash: flash !== null, boot1_size: boot1, flash_size: flash },
+    };
   },
+  async setNspireImage(part: "boot1" | "flash", path: string): Promise<number> {
+    const bytes = await readBytes(path);
+    if (part === "boot1" && bytes.length !== NSPIRE_BOOT1) throw new Error(`That file is ${bytes.length.toLocaleString()} bytes; a TI-Nspire boot1 image is 524,288 bytes (512 KB).`);
+    if (part === "flash" && !isNspireFlash(bytes.length)) {
+      throw new Error(`That file is ${bytes.length.toLocaleString()} bytes; a TI-Nspire flash image is 138,412,032 (132 MB, CX and CX II) or 34,603,008 (33 MB, older models). An OS file (.tcc, .tco, .tcc2) isn't a flash image.`);
+    }
+    await writeCalcFile(["nspire"], `${part}.img`, bytes);
+    return bytes.length;
+  },
+  async removeNspire() {
+    await (await opfsDir("calculator")).removeEntry("nspire", { recursive: true }).catch(() => { /* not there */ });
+  },
+  async writeNspireFlash(bytes: Uint8Array) { await writeCalcFile(["nspire"], "flash.img", bytes); },
   async read(name: string): Promise<Uint8Array> {
     const url = coreUrl(name);
     if (url) return new Uint8Array(await (await fetch(url)).arrayBuffer());
@@ -306,19 +361,21 @@ export const webCalc = {
     const file = await (await dir.getFileHandle(parts[parts.length - 1])).getFile();
     return new Uint8Array(await file.arrayBuffer());
   },
-  /** Keeps a ROM: 4 MB is the CE's, anything else goes with the other models. Returns "ce" or "rom:" and its name. */
+  /** Keeps a ROM: 4 MB goes with the CEs, anything else with the other models. Returns "ce:" or "rom:" and its name. */
   async setRom(path: string): Promise<string> {
     const bytes = await readBytes(path);
-    if (bytes.length >= 0x400000 && bytes.length <= 0x400100) {
-      const w = await (await (await opfsDir("calculator")).getFileHandle("CE.rom", { create: true })).createWritable();
-      await w.write(bytes as BlobPart); await w.close();
-      return "ce";
-    }
-    if (bytes.length < 0x4000 || bytes.length >= 0x400000) throw new Error(`That file is ${bytes.length} bytes, which isn't the size of a calculator ROM.`);
-    const name = path.split("/").pop()!.replace(/[^\w .()[\]+-]/g, "_");
-    const w = await (await (await opfsDir("calculator", "roms")).getFileHandle(name, { create: true })).createWritable();
-    await w.write(bytes as BlobPart); await w.close();
-    return `rom:${name}`;
+    // An Nspire flash image, as the desktop app takes it here too.
+    if (isNspireFlash(bytes.length)) { await writeCalcFile(["nspire"], "flash.img", bytes); return "nspire"; }
+    const ce = bytes.length >= 0x400000 && bytes.length <= 0x400100;
+    if (!ce && (bytes.length < 0x4000 || bytes.length >= 0x400000)) throw new Error(`That file is ${bytes.length} bytes, which isn't the size of a calculator ROM.`);
+    const folder = ce ? "ce" : "roms";
+    const name = await storedName(folder, path.split("/").pop()!.replace(/[^\w .()[\]+-]/g, "_").replace(/^\.+/, ""), bytes);
+    await writeCalcFile([folder], name, bytes);
+    return `${ce ? "ce" : "rom"}:${name}`;
   },
-  async removeRom(name: string) { await (await opfsDir("calculator", "roms")).removeEntry(name); },
+  /** Removes "ce/" and a CE ROM's name, or another model's ROM by its name. */
+  async removeRom(name: string) {
+    const [folder, file] = name.startsWith("ce/") ? ["ce", name.slice(3)] : ["roms", name];
+    await (await opfsDir("calculator", folder)).removeEntry(file);
+  },
 };

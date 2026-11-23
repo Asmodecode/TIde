@@ -1,18 +1,22 @@
-// Which calculator TI-BASIC programs are written for. The .8xp format is the same on both;
-// the screen and the available tokens differ. No Monaco dependency, so it is easy to test.
+// Which calculator the work is for: the open project's (tide.json's "calculator", or what its files
+// show), else the user's choice. For TI-BASIC, the .8xp format is the same on the CE and the Plus;
+// the screen and the available tokens differ. The Nspire runs .tns files (Ndless C/C++ and Luna
+// scripts), and its TI-BASIC checks are the CE's. No Monaco dependency, so it is easy to test.
 
-export type Target = "ce" | "plus";
+export type Target = "ce" | "plus" | "nspire";
 
-export const TARGETS: Record<Target, { label: string; cols: number; rows: number; pixelRows: number; pixelCols: number }> = {
-  ce: { label: "CE", cols: 26, rows: 10, pixelRows: 165, pixelCols: 265 },
-  plus: { label: "Plus", cols: 16, rows: 8, pixelRows: 63, pixelCols: 95 },
+export const TARGETS: Record<Target, { label: string; name: string; cols: number; rows: number; pixelRows: number; pixelCols: number }> = {
+  ce: { label: "CE", name: "TI-84 Plus CE", cols: 26, rows: 10, pixelRows: 165, pixelCols: 265 },
+  plus: { label: "Plus", name: "TI-84 Plus", cols: 16, rows: 8, pixelRows: 63, pixelCols: 95 },
+  nspire: { label: "Nspire", name: "TI-Nspire CX", cols: 26, rows: 10, pixelRows: 165, pixelCols: 265 },
 };
+export const isTarget = (v: unknown): v is Target => v === "ce" || v === "plus" || v === "nspire";
 
 const PREF = "tide-pref-target"; // must not start with "tide:" or the browser store lists it as a program
 const listeners = new Set<() => void>();
 
 let current: Target = "ce";
-try { if (localStorage.getItem(PREF) === "plus") current = "plus"; } catch { /* storage unavailable */ }
+try { const saved = localStorage.getItem(PREF); if (isTarget(saved)) current = saved; } catch { /* storage unavailable */ }
 
 export const getTarget = (): Target => current;
 

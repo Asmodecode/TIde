@@ -8,7 +8,8 @@
 // The model menu on the calculator bar picks one: the CE, the Nspire, or any ROM you've added for the
 // others. All draw to the same canvas and share one keypad, relabelled for the TI-85 and 86 and the
 // Nspire.
-import { invoke } from "@tauri-apps/api/core";
+import { identifyCeRom, identifyRom, type RomInfo } from "./rominfo";
+import { fs, type CalcFileList } from "./store";
 import { connect, type Connected, type USBDeviceLike } from "./link";
 import { DbusLink, detectModel, modelFamily } from "./dbus";
 import { describeDevice } from "./evo";
@@ -258,6 +259,11 @@ interface Key {
   col: number;
   kbd?: string[];
   cls?: string;
+  /** What shift or ctrl makes of it, written small above it (the Nspire's keys). */
+  top?: string;
+  /** What 2nd and alpha make of it, written above it on the left and right (the TI-84's keys). */
+  second?: string;
+  alpha?: string;
 }
 const k = (
   label: string,
@@ -388,11 +394,33 @@ const RELABEL_86: Record<string, [string, string[]]> = {
   ".": [".", [".", "z"]],
   "(−)": ["(−)", ["~", " "]],
 };
+// What 2nd and alpha make of each key, as printed above it on the TI-84 Plus CE (and the TI-83 Plus
+// and 84 Plus, which share the keypad): [2nd, alpha]. Empty where the calculator prints nothing.
+const SHIFTED_84: Record<string, [string, string]> = {
+  "y=": ["stat plot", "f1"], window: ["tblset", "f2"], zoom: ["format", "f3"], trace: ["calc", "f4"], graph: ["table", "f5"],
+  mode: ["quit", ""], del: ["ins", ""], alpha: ["A-lock", ""], "X,T,θ,n": ["link", ""], stat: ["list", ""],
+  math: ["test", "A"], apps: ["angle", "B"], prgm: ["draw", "C"], vars: ["distr", ""],
+  "x⁻¹": ["matrix", "D"], sin: ["sin⁻¹", "E"], cos: ["cos⁻¹", "F"], tan: ["tan⁻¹", "G"], "^": ["π", "H"],
+  "x²": ["√", "I"], ",": ["EE", "J"], "(": ["{", "K"], ")": ["}", "L"], "÷": ["e", "M"],
+  log: ["10ˣ", "N"], "7": ["u", "O"], "8": ["v", "P"], "9": ["w", "Q"], "×": ["[", "R"],
+  ln: ["eˣ", "S"], "4": ["L4", "T"], "5": ["L5", "U"], "6": ["L6", "V"], "−": ["]", "W"],
+  "sto→": ["rcl", "X"], "1": ["L1", "Y"], "2": ["L2", "Z"], "3": ["L3", "θ"], "+": ["mem", "\""],
+  on: ["off", ""], "0": ["catalog", "␣"], ".": ["i", ":"], "(−)": ["ans", "?"], enter: ["entry", "solve"],
+};
+for (const key of KEYPAD.flat()) {
+  const [second, alpha] = SHIFTED_84[key.label] ?? ["", ""];
+  if (second) key.second = second;
+  if (alpha) key.alpha = alpha;
+}
+
 const KEYPAD_86: Key[][] = KEYPAD.map((row) =>
   row.map((key) => {
     const [label, kbd] = RELABEL_86[key.label] ?? [key.label, key.kbd ?? []];
     return {
       ...key,
+      // The TI-85 and 86 print other things above their keys: none are shown yet.
+      second: undefined,
+      alpha: undefined,
       label,
       kbd:
         key.label === "2nd" ||
@@ -405,109 +433,60 @@ const KEYPAD_86: Key[][] = KEYPAD.map((row) =>
   }),
 );
 
-// The TI-Nspire CX keypad, in the physical order of the keys. Positions are Firebird's keypad
-// matrix (row 0–7, column 0–10, as in firebird's keymap.h), so the engine can pass them straight
-// to fb_key; row 8 is the touchpad. Letters type directly (the Nspire has letter keys), so each
-// gets its own key on the keyboard.
+// ── The TI-Nspire CX's keyboard, laid out as on the calculator ──
+// Each key by its place in Firebird's key matrix (its keymap.h: id = row × 11 + column, the row
+// and column fb_key takes), with what shift or ctrl makes of it written above it, as on the
+// calculator's own keys. The regions and their keys follow Firebird's Keypad.qml.
+const nk = (id: number, label: string, kbd?: string[], cls?: string, top?: string): Key =>
+  ({ label, row: Math.floor(id / 11), col: id % 11, kbd, cls, top });
+/** The Nspire's keys, in the regions they sit in. */
+const NS = {
+  /** Beside the touchpad: esc, scratchpad, tab on the left; on, doc, menu on the right. */
+  left: [nk(73, "esc", ["Escape"]), nk(65, "pad", [], "", "save"), nk(75, "tab", ["Tab"])],
+  right: [nk(9, "⌂ on", ["F12", "Home"]), nk(69, "doc", ["PageUp"], "", "+page"), nk(71, "menu", ["PageDown", "F1"])],
+  /** Under the touchpad: ctrl, shift and var on the left, del on the right. */
+  bar: [nk(86, "ctrl", [], "ctrl"), nk(85, "shift", [], "shift", "CAPS"), nk(56, "var", ["Insert"], "", "sto→")],
+  del: nk(64, "del", ["Backspace", "Delete"], "", "clear"),
+  /** The math keys left of the number pad, in pairs. */
+  math: [
+    [nk(51, "=", ["="], "", "≠≥>"), nk(20, "trig", [], "", "?")],
+    [nk(53, "^", ["^"], "", "ⁿ√x"), nk(31, "x²", ["@"], "", "√")],
+    [nk(42, "eˣ", [], "", "ln"), nk(21, "10ˣ", [], "", "log")],
+    [nk(60, "(", ["(", "["], "", "[ ]"), nk(58, ")", [")", "]"], "", "{ }")],
+  ],
+  /** The number pad. */
+  num: [
+    [nk(40, "7", ["7"], "num"), nk(72, "8", ["8"], "num"), nk(36, "9", ["9"], "num")],
+    [nk(29, "4", ["4"], "num"), nk(61, "5", ["5"], "num"), nk(25, "6", ["6"], "num")],
+    [nk(18, "1", ["1"], "num"), nk(70, "2", ["2"], "num"), nk(14, "3", ["3"], "num")],
+    [nk(7, "0", ["0"], "num"), nk(59, ".", ["."], "num", "capture"), nk(3, "(−)", ["~"], "num", "ans")],
+  ],
+  /** The operators right of the number pad, in pairs, and enter. */
+  ops: [
+    [nk(63, "catalog", [], "", ":="), nk(62, "templates", [], "", "∞β°")],
+    [nk(52, "×", ["*"], "op", "\"□\""), nk(41, "÷", ["/"], "op")],
+    [nk(68, "+", ["+"], "op"), nk(57, "−", ["-"], "op")],
+  ],
+  enter: nk(1, "enter", ["Enter"], "op", "≈"),
+  /** The letters, nine to a row, as on the calculator. */
+  alpha: [
+    [nk(30, "EE"), ...[..."ABCDEFG"].map((c, i) => nk([50, 49, 48, 46, 45, 44, 39][i], c, [c.toLowerCase()])), nk(8, "?!▸", ["?", "!"])],
+    [nk(19, "π▸"), ...[..."HIJKLMN"].map((c, i) => nk([38, 37, 35, 34, 33, 28, 27][i], c, [c.toLowerCase()])), nk(66, "⚑")],
+    [nk(87, ",", [","]), ...[..."OPQRSTU"].map((c, i) => nk([26, 24, 23, 22, 17, 16, 15][i], c, [c.toLowerCase()])), nk(0, "↵", ["F2"])],
+    [...[..."VWXYZ"].map((c, i) => nk([13, 12, 11, 6, 5][i], c, [c.toLowerCase()])), nk(4, "space", [" "])],
+  ],
+};
+/** Every Nspire key, for the keyboard bindings and key.press (calc.ts's layout()). */
 const KEYPAD_NS: Key[][] = [
-  [
-    k("doc", 6, 3, ["PageUp"]),
-    k("menu", 6, 5, ["PageDown"]),
-    k("esc", 6, 7, ["Escape"]),
-    k("tab", 6, 9, ["Tab"]),
-    k("on", 0, 9, ["F12"], "second"),
-  ],
-  [
-    k("shift", 7, 8, ["Shift"], "second"),
-    k("var", 5, 1, ["Insert"], "alpha"),
-    k("7", 3, 7, ["7"], "num"),
-    k("8", 6, 6, ["8"], "num"),
-    k("9", 3, 3, ["9"], "num"),
-    k("pad", 5, 10),
-  ],
-  [
-    k("ctrl", 7, 9, ["Control"], "second"),
-    k("del", 5, 9, ["Backspace", "Delete"]),
-    k("4", 2, 7, ["4"], "num"),
-    k("5", 5, 6, ["5"], "num"),
-    k("6", 2, 3, ["6"], "num"),
-  ],
-  [
-    k("1", 1, 7, ["1"], "num"),
-    k("2", 6, 4, ["2"], "num"),
-    k("3", 1, 3, ["3"], "num"),
-    k("0", 0, 7, ["0"], "num"),
-    k(".", 5, 4, ["."], "num"),
-    k("(−)", 0, 3, ["~"], "num"),
-  ],
-  [
-    k("EE", 2, 8),
-    k("A", 4, 6, ["a"]),
-    k("B", 4, 5, ["b"]),
-    k("C", 4, 4, ["c"]),
-    k("D", 4, 2, ["d"]),
-    k("E", 4, 1, ["e"]),
-    k("F", 4, 0, ["f"]),
-    k("G", 3, 6, ["g"]),
-  ],
-  [
-    k("H", 3, 5, ["h"]),
-    k("I", 3, 4, ["i"]),
-    k("J", 3, 2, ["j"]),
-    k("K", 3, 1, ["k"]),
-    k("L", 3, 0, ["l"]),
-    k("M", 2, 6, ["m"]),
-    k("N", 2, 5, ["n"]),
-    k("?!", 0, 8, ["?"], "fn"),
-    k("π", 1, 8, [], "fn"),
-  ],
-  [
-    k("O", 2, 4, ["o"]),
-    k("P", 2, 2, ["p"]),
-    k("Q", 2, 1, ["q"]),
-    k("R", 2, 0, ["r"]),
-    k("S", 1, 6, ["s"]),
-    k("T", 1, 5, ["t"]),
-    k("U", 1, 4, ["u"]),
-    k(",", 7, 10, [","]),
-    k("↵", 0, 0),
-  ],
-  [
-    k("V", 1, 2, ["v"]),
-    k("W", 1, 1, ["w"]),
-    k("X", 1, 0, ["x"]),
-    k("Y", 0, 6, ["y"]),
-    k("Z", 0, 5, ["z"]),
-    k("space", 0, 4, [" "]),
-  ],
-  [
-    k("=", 4, 7, ["="], "op"),
-    k("trig", 1, 9),
-    k("^", 4, 9, ["^"], "op"),
-    k("x²", 2, 9),
-    k("eˣ", 3, 9),
-    k("10ˣ", 1, 10),
-    k("(", 5, 5, ["("], "op"),
-    k(")", 5, 3, [")"], "op"),
-  ],
-  [
-    k("metrix", 5, 8),
-    k("cat", 5, 7),
-    k("×", 4, 8, ["*"], "op"),
-    k("÷", 3, 8, ["/"], "op"),
-    k("+", 6, 2, ["+"], "op"),
-    k("−", 5, 2, ["-"], "op"),
-    k("enter", 0, 1, ["Enter"], "op"),
-    k("flag", 6, 0),
-  ],
+  NS.left, NS.right, [...NS.bar, NS.del], ...NS.math, ...NS.num, ...NS.ops, [NS.enter], ...NS.alpha,
 ];
-// The Nspire's touchpad, as direction keys plus a click; row 8 tells the engine to use fb_touch.
+/** The touchpad, by the engine's touch keys (row 8): up, left, right, down, and a click in the middle. */
 const ARROWS_NS: Key[] = [
   k("▲", 8, 0, ["ArrowUp"]),
   k("◀", 8, 1, ["ArrowLeft"]),
   k("▶", 8, 2, ["ArrowRight"]),
   k("▼", 8, 3, ["ArrowDown"]),
-  k("⬤", 8, 4),
+  k("click", 8, 4),
 ];
 
 interface Layout {
@@ -567,8 +546,65 @@ function layout(keypad: Key[][], arrows: Key[] = ARROWS): Layout {
     ]),
   };
 }
+// ── Each Wabbitemu model's keypad ──
+// They all share the TI-84's grid of keys (and its keyboard bindings): a model's keypad is that
+// grid with the model's own printed labels. Only what TI's guidebooks confirm is printed; what
+// they don't stays blank rather than guessed. (Sources: the TI-83 Guidebook, 1996; the TI-82
+// Guidebook, 1993; the TI-81 Guidebook, 1990; the TI-85 Graphics Calculator Guidebook, 1993.)
+type Face = { label?: string; second?: string; alpha?: string };
+/** `base` with `faces` over it, by each key's TI-84 label; `keep`: whether unlisted keys keep their labels above. */
+function faced(base: Key[][], faces: Record<string, Face>, keep: boolean): Key[][] {
+  return base.map(row => row.map(key => {
+    const face = faces[key.label] ?? {};
+    return {
+      ...key,
+      label: face.label ?? key.label,
+      second: (face.second ?? (keep ? key.second : undefined)) || undefined,
+      alpha: (face.alpha ?? (keep ? key.alpha : undefined)) || undefined,
+    };
+  }));
+}
+
+/** The TI-83: the TI-84's keys, but MATRX where APPS is, FINANCE above x⁻¹, and no F1–F5 or SOLVE. */
+const KEYPAD_83 = faced(KEYPAD, {
+  "y=": { alpha: "" }, window: { alpha: "" }, zoom: { alpha: "" }, trace: { alpha: "" }, graph: { alpha: "" },
+  apps: { label: "matrx", second: "angle", alpha: "B" },
+  "x⁻¹": { second: "finance" },
+  enter: { alpha: "" },
+}, true);
+
+/** The TI-82: the TI-83's keys, with the 2nd functions and letters its guidebook gives. */
+const KEYPAD_82 = faced(KEYPAD, {
+  "y=": { second: "stat plot" }, window: { second: "tblset" }, zoom: { second: "format" }, trace: { second: "calc" }, graph: { second: "table" },
+  mode: { second: "quit" }, del: { second: "ins" }, alpha: { second: "A-lock" }, "X,T,θ,n": { second: "link" }, stat: { second: "list" },
+  math: { second: "test", alpha: "A" }, apps: { label: "matrx", alpha: "B" }, prgm: { second: "draw", alpha: "C" }, vars: { second: "y-vars" },
+  "x⁻¹": { alpha: "D" }, sin: { second: "sin⁻¹", alpha: "E" }, cos: { second: "cos⁻¹", alpha: "F" }, tan: { second: "tan⁻¹", alpha: "G" }, "^": { second: "π", alpha: "H" },
+  "x²": { second: "√", alpha: "I" }, ",": { second: "EE", alpha: "J" }, "(": { second: "{", alpha: "K" }, ")": { second: "}", alpha: "L" }, "÷": { alpha: "M" },
+  log: { second: "10ˣ", alpha: "N" }, "7": { alpha: "O" }, "8": { alpha: "P" }, "9": { alpha: "Q" }, "×": { second: "[", alpha: "R" },
+  ln: { second: "eˣ", alpha: "S" }, "4": { second: "L4", alpha: "T" }, "5": { second: "L5", alpha: "U" }, "6": { second: "L6", alpha: "V" }, "−": { second: "]", alpha: "W" },
+  "sto→": { second: "rcl", alpha: "X" }, "1": { second: "L1", alpha: "Y" }, "2": { second: "L2", alpha: "Z" }, "3": { second: "L3", alpha: "θ" }, "+": { second: "mem" },
+  on: { second: "off" }, "(−)": { second: "ans" }, enter: { second: "entry" },
+}, false);
+
+/** The TI-81: RANGE and MATRX, and the 2nd functions its guidebook names. */
+const KEYPAD_81 = faced(KEYPAD, {
+  window: { label: "range" }, apps: { label: "matrx" },
+  "x⁻¹": { second: "abs" }, sin: { second: "sin⁻¹" }, cos: { second: "cos⁻¹" }, tan: { second: "tan⁻¹" }, "^": { second: "π" },
+  "+": { second: "reset" }, enter: { second: "entry" },
+}, false);
+
+/** The TI-85 and 86: their own keys (KEYPAD_86), with the 2nd functions the TI-85 guidebook gives. */
+const KEYPAD_8586 = faced(KEYPAD_86, {
+  F1: { second: "M1" }, F2: { second: "M2" }, F3: { second: "M3" }, F4: { second: "M4" }, F5: { second: "M5" },
+  exit: { second: "quit" }, more: { second: "mode" }, del: { second: "ins" },
+  "+": { second: "mem" }, enter: { second: "entry" }, on: { second: "off" },
+}, false);
+
 const LAYOUT_CE = layout(KEYPAD),
-  LAYOUT_86 = layout(KEYPAD_86),
+  LAYOUT_8586 = layout(KEYPAD_8586),
+  LAYOUT_83 = layout(KEYPAD_83),
+  LAYOUT_82 = layout(KEYPAD_82),
+  LAYOUT_81 = layout(KEYPAD_81),
   LAYOUT_NS = layout(KEYPAD_NS, ARROWS_NS);
 
 /** How a binding reads in a tooltip. */
@@ -737,17 +773,8 @@ export function createCalc(opts: {
   let fbProgress: ((p: number) => void) | null = null;
   (window as unknown as Record<string, unknown>).tideFbProgress = (p: number) =>
     fbProgress?.(p);
-  /** Saves the Nspire's flash image back to TIde's data folder, in chunks (invoke args are JSON). */
-  async function saveNspireFlash(bytes: Uint8Array) {
-    const CHUNK = 4 * 1024 * 1024;
-    for (let at = 0; at < bytes.length; at += CHUNK) {
-      const end = Math.min(at + CHUNK, bytes.length);
-      await invoke("calc_nspire_flash_write", {
-        offset: at,
-        bytes: Array.from(bytes.subarray(at, end)),
-      });
-    }
-  }
+  /** Saves the Nspire's flash image back to TIde's storage: its data folder, or the browser's. */
+  const saveNspireFlash = (bytes: Uint8Array) => fs.calc.writeNspireFlash(bytes);
   // Libraries already on the calculator since it started, by name and size.
   const sentLibs = new Set<string>();
 
@@ -847,7 +874,21 @@ export function createCalc(opts: {
   }
 
   // ── Keypad ──
-  const press = (key: Key, down: boolean) => engine?.key(key, down);
+  /** 2nd or alpha, pressed and waiting for the next key: the keypad lights that one's labels. */
+  let armed: "2nd" | "alpha" | null = null;
+  const arm = (next: "2nd" | "alpha" | null) => {
+    armed = next;
+    if (next) ui.keypad.dataset.armed = next;
+    else delete ui.keypad.dataset.armed;
+  };
+  const press = (key: Key, down: boolean) => {
+    if (down && shownLayout !== LAYOUT_NS) {
+      // Pressing it again cancels it, as on the calculator; any other key uses it up.
+      if (key.label === "2nd" || key.label === "alpha") arm(armed === key.label ? null : key.label);
+      else arm(null);
+    }
+    engine?.key(key, down);
+  };
   /** Presses and releases a key, waiting for the calculator to see both. */
   const tap = async (key: Key, hold = 120, after = 180) => {
     press(key, true);
@@ -862,11 +903,14 @@ export function createCalc(opts: {
     const button = (key: Key) => {
       const b = document.createElement("button");
       b.type = "button";
-      b.textContent = key.label;
+      // The Nspire's shift or ctrl function, small above its label on the key, as printed there.
+      if (key.top) b.append(Object.assign(document.createElement("small"), { textContent: key.top }), Object.assign(document.createElement("span"), { textContent: key.label }));
+      else b.textContent = key.label;
       b.className = `key ${key.cls ?? ""}`;
-      b.title = key.kbd?.length
+      const shifted = [key.second && `2nd: ${key.second}`, key.alpha && `alpha: ${key.alpha}`].filter(Boolean).join(", ");
+      b.title = (key.kbd?.length
         ? `${key.label} (${key.kbd.map(keyName).join(" or ")})`
-        : key.label;
+        : key.label) + (shifted ? ` · ${shifted}` : "");
       const release = () => {
         press(key, false);
         window.removeEventListener("pointerup", release);
@@ -879,6 +923,27 @@ export function createCalc(opts: {
       });
       return b;
     };
+    ui.keypad.classList.toggle("nspire", l === LAYOUT_NS);
+    arm(null);
+    if (l === LAYOUT_NS) { ui.keypad.replaceChildren(...nspireKeypad(button)); return; }
+    /**
+     * A key with what 2nd and alpha make of it printed on the body above it, as on the TI-84: the
+     * 2nd function on the left, the alpha letter on the right. Every key gets the strip, so the
+     * keys of a row line up whether or not they have labels.
+     */
+    const cell = (key: Key) => {
+      const over = document.createElement("div");
+      over.className = "key-over";
+      over.append(
+        Object.assign(document.createElement("span"), { className: "key-2nd", textContent: key.second ?? "" }),
+        Object.assign(document.createElement("span"), { className: "key-alpha", textContent: key.alpha ?? "" }));
+      const b = button(key);
+      if (key.label === "2nd" || key.label === "alpha") b.dataset.modifier = key.label;
+      const c = document.createElement("div");
+      c.className = "key-cell";
+      c.append(over, b);
+      return c;
+    };
     const arrows = document.createElement("div");
     arrows.className = "arrows";
     arrows.append(...l.arrows.map(button));
@@ -886,13 +951,48 @@ export function createCalc(opts: {
       ...l.keypad.map((row, i) => {
         const div = document.createElement("div");
         div.className = "keyrow";
-        div.append(...row.map(button));
+        div.append(...row.map(cell));
         if (i === 1) div.append(arrows); // the arrow pad sits beside 2nd, mode and del
         return div;
       }),
     );
   }
   buildKeypad(LAYOUT_CE);
+
+  /** The TI-Nspire CX's keyboard, laid out as on the calculator (NS, at the top of the file). */
+  function nspireKeypad(button: (key: Key) => HTMLButtonElement): HTMLElement[] {
+    const div = (className: string, ...kids: HTMLElement[]) => {
+      const d = document.createElement("div");
+      d.className = className;
+      d.append(...kids);
+      return d;
+    };
+    // The touchpad: a round pad, its edges up, left, right and down, its middle a click.
+    const [up, left, right, down, click] = ARROWS_NS.map(key => {
+      const b = button(key);
+      b.classList.add(`ns-touch-${key.col}`);
+      b.setAttribute("aria-label", key.col === 4 ? "Touchpad click" : `Touchpad ${["up", "left", "right", "down"][key.col]}`);
+      if (key.col === 4) b.textContent = "";
+      return b;
+    });
+    const touchpad = div("ns-touchpad", up, left, click, right, down);
+    const pairs = (rows: Key[][]) => div("ns-pairs", ...rows.map(row => div("ns-pair", ...row.map(button))));
+    return [
+      div("ns-top", div("ns-side", ...NS.left.map(button)), touchpad, div("ns-side", ...NS.right.map(button))),
+      div("ns-bar", ...NS.bar.map(button), div("ns-gap"), button(NS.del)),
+      div("ns-middle",
+        pairs(NS.math),
+        div("ns-num", ...NS.num.flat().map(button)),
+        div("ns-ops", pairs(NS.ops), (() => { const b = button(NS.enter); b.classList.add("ns-enter"); return b; })())),
+      // The last row starts one place in (V under O) and ends one place short: nothing under the
+      // comma or the return key, with space across the two places under T and U.
+      div("ns-alpha", ...NS.alpha.flat().flatMap(key => {
+        const b = button(key);
+        if (key.label === "space") { b.classList.add("ns-space"); return [b, div("ns-blank")]; }
+        return key.label === "V" ? [div("ns-blank"), b] : [b];
+      })),
+    ];
+  }
 
   // The physical keyboard drives the calculator while its panel is open, with CEmu's bindings.
   // Keys typed into the editor or a form field still go there. A key is released by its physical
@@ -930,18 +1030,14 @@ export function createCalc(opts: {
     held.clear();
   });
 
-  // ── Models and files ──
-  type Files = {
-    rom: boolean;
-    roms: string[];
-    nspire: { boot1: boolean; flash: boolean };
-  };
-  const files = () => invoke<Files>("calc_files");
-  const read = async (name: string) =>
-    new Uint8Array(await invoke<ArrayBuffer>("calc_read", { name }));
+  // ── Models and files: through fs.calc, which is the desktop app's data folder, or in the web
+  // version the browser's storage ──
+  type Files = CalcFileList;
+  const files = () => fs.calc.files();
+  const read = (name: string) => fs.calc.read(name);
   const MODEL_PREF = "tide-pref-calc-model",
     NAMES_PREF = "tide-pref-calc-rom-models";
-  /** "ce", "nspire", "real" (a real calculator), or "rom:" and a stored ROM's file name. */
+  /** "ce:" and a CE ROM's name, "nspire", "real" (a real calculator), or "rom:" and another stored ROM's name. (A plain "ce" is from before TIde kept several CE ROMs.) */
   let choice = "ce";
   try {
     choice = localStorage.getItem(MODEL_PREF) ?? "ce";
@@ -958,6 +1054,10 @@ export function createCalc(opts: {
   } catch {
     /* storage unavailable or bad JSON */
   }
+  const ROM_INFO_PREF = "tide-pref-calc-rom-info";
+  /** Each stored ROM's model and OS (rominfo.ts), read once from its bytes: by name, and a CE ROM by "ce/" and its name. */
+  let romInfo: Record<string, RomInfo> = {};
+  try { romInfo = JSON.parse(localStorage.getItem(ROM_INFO_PREF) ?? "{}"); } catch { /* storage unavailable or bad JSON */ }
   function remember(key: string, value: unknown) {
     try {
       localStorage.setItem(
@@ -970,58 +1070,305 @@ export function createCalc(opts: {
   }
 
   let known: Files | null = null;
+  /**
+   * The model menu: only the calculators TIde has images for (the CE's ROM, both Nspire images, each
+   * other ROM), a real calculator, and Add a ROM…, which opens the images popup. Removing an image
+   * is in the popup too.
+   */
   function fillMenu(have: Files | null) {
-    const roms =
-      have?.roms ?? (choice.startsWith("rom:") ? [choice.slice(4)] : []);
-    const options: [string, string][] = [
-      ["ce", "TI-84 Plus CE"],
-      ["nspire", "TI-Nspire CX"],
-      ...roms.map(
-        (n) =>
-          [`rom:${n}`, romModels[n] ? `${romModels[n]} (${n})` : n] as [
-            string,
-            string,
-          ],
-      ),
+    const roms = have?.roms ?? (choice.startsWith("rom:") ? [choice.slice(4)] : []);
+    const ces = have?.ces ?? (choice.startsWith("ce:") ? [choice.slice(3)] : []);
+    // The CE choice from before several CE ROMs were kept: its ROM is ce/CE.rom now.
+    if (choice === "ce" && ces.length) choice = `ce:${ces.includes("CE.rom") ? "CE.rom" : ces[0]}`;
+    const nspireIn = have ? have.nspire.boot1 && have.nspire.flash : choice === "nspire";
+    const installed: [string, string][] = [
+      // A CE ROM by the model its certificate names and its boot code: "TI-83 Premium CE · boot 5.3.6.0014".
+      ...ces.map(n => { const i = romInfo[`ce/${n}`]; return [`ce:${n}`, i ? `${i.model} · boot ${i.version}` : n] as [string, string]; }),
+      ...(nspireIn ? [["nspire", "TI-Nspire CX"] as [string, string]] : []),
+      // A ROM by its model and OS, as read from it: "TI-84 Plus · OS 2.55MP".
+      ...roms.map(n => [`rom:${n}`, romInfo[n] ? `${romInfo[n].model} · OS ${romInfo[n].version}` : romModels[n] ? `${romModels[n]} (${n})` : n] as [string, string]),
     ];
-    if (
-      choice !== "ce" &&
-      choice !== "nspire" &&
-      choice !== "real" &&
-      !roms.includes(choice.slice(4)) &&
-      have
-    )
-      choice = "ce";
-    options.push(["real", "Real calculator"], ["add", "Add a ROM…"]);
-    if (choice.startsWith("rom:"))
-      options.push(["remove", `Remove ${choice.slice(4)}…`]);
-    if (choice === "nspire")
-      options.push(["remove-nspire", "Remove Nspire images…"]);
-    ui.model.replaceChildren(
-      ...options.map(([value, label]) =>
-        Object.assign(document.createElement("option"), {
-          value,
-          textContent: label,
-        }),
-      ),
-    );
+    // Two ROMs of the same calculator and version: their file names tell them apart.
+    for (const entry of installed) {
+      if (installed.filter(([, l]) => l === entry[1]).length > 1) entry[1] += ` (${entry[0].replace(/^\w+:/, "")})`;
+    }
+    // A choice whose images are gone falls back to the first calculator that has them.
+    if (have && choice !== "real" && !installed.some(([v]) => v === choice) && installed.length) choice = installed[0][0];
+    const options: [string, string][] = [...installed, ["real", "Real calculator"], ["add", "Add a ROM…"]];
+    // Nothing installed yet: the menu says so, and the panel offers the images popup.
+    if (!options.some(([v]) => v === choice)) options.unshift([choice, "No calculator images yet"]);
+    ui.model.replaceChildren(...options.map(([value, label]) =>
+      Object.assign(document.createElement("option"), { value, textContent: label })));
     ui.model.value = choice;
   }
   fillMenu(null);
 
   /** A message in place of the screen, with the button that sets the calculator up, if any. */
+  // ── Calculator images: one popup for every image the emulators run from ──
+  // A tab per family: the TI-84 Plus CE's ROM; the TI-Nspire's boot1 and flash images; ROMs for
+  // the TI-73 to 86, each named by the model and OS read from it (rominfo.ts). Every image is a
+  // card: what it is, its state, and buttons to choose (or replace), start and remove it. An image
+  // is stored as soon as it's chosen. Add a ROM… opens the popup, and so does the Calculator
+  // images… button wherever an image is missing.
+  /** Reads stored ROMs not identified yet (by name, or "ce/" and a CE ROM's name), and keeps what they are. */
+  async function identifyRoms(names: string[]) {
+    let found = false;
+    for (const name of names.filter(n => !romInfo[n] && !/\.sav$/i.test(n))) {
+      try {
+        const ce = name.startsWith("ce/");
+        const info = ce ? identifyCeRom(await read(name)) : identifyRom(await read(`roms/${name}`));
+        if (!info) continue;
+        romInfo[name] = info;
+        if (!ce && !romModels[name]) romModels[name] = info.model;
+        found = true;
+      } catch { /* unreadable: it stays unnamed */ }
+    }
+    if (!found) return;
+    remember(ROM_INFO_PREF, romInfo);
+    remember(NAMES_PREF, romModels);
+    fillMenu(known);
+    if (imagesOpen) renderImages();
+  }
+
+  const imagesBody = Object.assign(document.createElement("div"), { className: "images-body" });
+  const imagesTabs = Object.assign(document.createElement("div"), { className: "images-tabs", role: "tablist" });
+
+  const mb = (bytes: number) => (bytes >= 1024 * 1024 ? `${(bytes / 1024 / 1024).toFixed(bytes % (1024 * 1024) ? 1 : 0)} MB` : `${Math.round(bytes / 1024)} KB`);
+  const el = <K extends keyof HTMLElementTagNameMap>(tag: K, props: Record<string, unknown> = {}, ...kids: (Node | string)[]) => {
+    const node = Object.assign(document.createElement(tag), props);
+    node.append(...kids);
+    return node;
+  };
+  const action = (label: string, run: () => void, kind: "primary" | "" | "danger" = "") =>
+    el("button", { type: "button", className: kind ? `image-btn ${kind}` : "image-btn", onclick: run }, label);
+  /** A chip, for an image card. */
+  const chipIcon = () => {
+    const ns = "http://www.w3.org/2000/svg";
+    const svg = document.createElementNS(ns, "svg");
+    svg.setAttribute("viewBox", "0 0 24 24");
+    svg.setAttribute("aria-hidden", "true");
+    for (const d of ["M7 4h10a3 3 0 0 1 3 3v10a3 3 0 0 1-3 3H7a3 3 0 0 1-3-3V7a3 3 0 0 1 3-3z", "M9 9h6v6H9z", "M9 1v3M15 1v3M9 20v3M15 20v3M1 9h3M1 15h3M20 9h3M20 15h3"]) {
+      const path = document.createElementNS(ns, "path");
+      path.setAttribute("d", d);
+      svg.append(path);
+    }
+    return el("span", { className: "image-icon" }, svg);
+  };
+
+  /** One image: what it is, details, whether it's in, and what can be done with it. */
+  function imageCard(title: string, meta: string, isIn: boolean, actions: HTMLElement[]) {
+    return el("div", { className: `image-card ${isIn ? "in" : "missing"}` },
+      chipIcon(),
+      el("div", { className: "image-main" }, el("strong", {}, title), el("span", { className: "image-meta" }, meta)),
+      el("span", { className: "image-pill" }, isIn ? "Installed" : "Missing"),
+      el("div", { className: "image-actions" }, ...actions));
+  }
+
+  type ImageKind = "ce" | "rom" | "boot1" | "flash";
+  /** Picks and stores an image of one kind; the popup shows the result. */
+  async function chooseImage(kind: ImageKind, button?: HTMLButtonElement) {
+    const path = await opts.pickRom(
+      kind === "ce" ? "TI-84 Plus CE or TI-83 Premium CE ROM (4 MB)"
+        : kind === "rom" ? "Calculator ROM (TI-73 to 86) or Wabbitemu save"
+          : kind === "boot1" ? "TI-Nspire boot1 image (512 KB)" : "TI-Nspire flash image (33 or 132 MB)",
+      kind === "ce" ? ["rom", "bin"] : kind === "rom" ? ["rom", "sav", "bin"] : kind === "boot1" ? ["img", "bin", "rom"] : ["img", "bin"],
+    );
+    if (!path) return;
+    if (button) { button.disabled = true; button.textContent = kind === "flash" ? "Copying… (it's big)" : "Copying…"; }
+    try {
+      if (kind === "boot1" || kind === "flash") {
+        const size = await fs.calc.setNspireImage(kind, path);
+        say(`Saved the Nspire's ${kind} image (${mb(size)}).`);
+      } else {
+        // A CE ROM is told from the others by its size.
+        const stored = await fs.calc.setRom(path);
+        if (stored.startsWith("ce:")) {
+          const name = stored.slice(3), key = `ce/${name}`;
+          delete romInfo[key]; // a replaced ROM is read again
+          await identifyRoms([key]);
+          const info = romInfo[key];
+          say(info ? `Saved ${name}: a ${info.model}, boot code ${info.version}.` : `Saved ${name}.`);
+          if (kind === "rom") say("It's a CE ROM, so it's with the CE calculators, in CEmu.");
+        } else if (stored.startsWith("rom:")) {
+          const name = stored.slice(4);
+          delete romInfo[name]; // a replaced ROM is read again
+          await identifyRoms([name]);
+          const info = romInfo[name];
+          say(info ? `Saved ${name}: a ${info.model}, OS ${info.version}.` : `Saved ${name}.`);
+          if (kind === "ce") say(`That isn't a CE ROM (those are 4 MB): TIde kept it as ${info ? `a ${info.model} ROM` : name}.`);
+        } else say("Saved the Nspire image.");
+      }
+    } catch (err) {
+      say(String(err instanceof Error ? err.message : err));
+    }
+    known = await files().catch(() => known);
+    fillMenu(known);
+    renderImages();
+  }
+
+  /** Removes a stored ROM: by its name, or "ce/" and a CE ROM's name. */
+  async function removeRomImage(key: string) {
+    const name = key.replace(/^ce\//, "");
+    const value = key.startsWith("ce/") ? `ce:${name}` : `rom:${name}`;
+    if (!confirm(`Remove ${name} from TIde? The file you added it from stays where it is.`)) return;
+    try {
+      if (choice === value) await stop();
+      await fs.calc.removeRom(key);
+      delete romModels[key];
+      delete romInfo[key];
+      remember(NAMES_PREF, romModels);
+      remember(ROM_INFO_PREF, romInfo);
+      if (choice === value) { choice = "ce"; remember(MODEL_PREF, choice); }
+    } catch (err) {
+      say(`Could not remove ${name}: ${err}`);
+    }
+    known = await files().catch(() => known);
+    fillMenu(known);
+    renderImages();
+  }
+
+  async function removeNspireImages() {
+    if (!confirm("Remove the Nspire boot1 and flash images from TIde? The files you added them from stay where they are.")) return;
+    try {
+      if (choice === "nspire") await stop();
+      await fs.calc.removeNspire();
+    } catch (err) {
+      say(`Could not remove the Nspire images: ${err}`);
+    }
+    known = await files().catch(() => known);
+    fillMenu(known);
+    renderImages();
+  }
+
+  type ImagesTab = "ce" | "nspire" | "roms";
+  /** The popup's tab: one calculator family at a time. */
+  let imagesTab: ImagesTab = "ce";
+  /** The tab to open on: the calculator chosen, or else the first family missing its images. */
+  function tabFor(have: Files | null): ImagesTab {
+    if (choice === "nspire") return "nspire";
+    if (choice.startsWith("rom:")) return "roms";
+    if (choice === "ce" || choice.startsWith("ce:") || !have) return "ce";
+    return !have.ces.length ? "ce" : !(have.nspire.boot1 && have.nspire.flash) ? "nspire" : "roms";
+  }
+
+  /** Draws the tabs and the chosen tab's images, from what's stored. */
+  function renderImages() {
+    const have = known;
+    if (!have) { imagesBody.replaceChildren(el("p", { className: "images-empty" }, "Looking for stored images…")); return; }
+    const ns = have.nspire;
+    const start = (target: string, label = "Start") => action(label, () => { closeImages(false); void choose(target); }, "primary");
+    const chooser = (kind: ImageKind, isIn: boolean) => {
+      const b = action(isIn ? "Replace…" : "Choose…", () => void chooseImage(kind, b), isIn ? "" : "primary");
+      return b;
+    };
+    const intro = (text: string) => el("p", { className: "images-intro" }, text);
+    const footer = (...kids: HTMLElement[]) => el("div", { className: "images-section-actions" }, ...kids);
+
+    const tabs: [ImagesTab, string, boolean][] = [
+      ["ce", "CE calculators", have.ces.length > 0],
+      ["nspire", "TI-Nspire CX", ns.boot1 && ns.flash],
+      ["roms", "TI-73 to 86", have.roms.length > 0],
+    ];
+    imagesTabs.replaceChildren(...tabs.map(([id, label, ready]) =>
+      el("button", {
+        type: "button", role: "tab", ariaSelected: String(id === imagesTab), className: `images-tab${ready ? " ready" : ""}`,
+        title: ready ? `${label}: ready to start` : `${label}: images missing`,
+        onclick: () => { imagesTab = id; renderImages(); },
+      }, el("span", { className: "images-dot" }), label)));
+
+    const sections: Record<ImagesTab, () => HTMLElement[]> = {
+      ce: () => [
+        intro("The TI-84 Plus CE, TI-83 Premium CE and TI-82 Advanced Edition Python run in CEmu, each from a ROM dumped from your own calculator. Keep as many as you like: TIde reads each one's model and boot code."),
+        ...(have.ces.length
+          ? have.ces.map(name => {
+              const info = romInfo[`ce/${name}`];
+              return imageCard(info?.model ?? name, info ? `Boot ${info.version} · ${name}` : `${name} · identifying…`, true,
+                [action("Remove…", () => void removeRomImage(`ce/${name}`), "danger"), start(`ce:${name}`)]);
+            })
+          : [imageCard("CE ROM", "4 MB, dumped from your TI-84 Plus CE or TI-83 Premium CE", false, [chooser("ce", false)])]),
+        ...(have.ces.length ? [footer((() => { const b = action("Add a CE ROM…", () => void chooseImage("ce", b), "primary"); return b; })())] : []),
+      ],
+      nspire: () => [
+        intro("The TI-Nspire CX runs from two images dumped from your own calculator. The flash image is its whole memory, not an OS file (.tcc, .tco, .tcc2)."),
+        imageCard("Boot1 image", ns.boot1 ? `${ns.boot1_size ? mb(ns.boot1_size) : "512 KB"} · boot1.img` : "512 KB", ns.boot1, [chooser("boot1", ns.boot1)]),
+        imageCard("Flash image", ns.flash ? `${ns.flash_size ? mb(ns.flash_size) : ""} · flash.img` : "132 MB (CX, CX II) or 33 MB (older models)", ns.flash, [chooser("flash", ns.flash)]),
+        footer(
+          ...(ns.boot1 || ns.flash ? [action("Remove both…", () => void removeNspireImages(), "danger")] : []),
+          ...(ns.boot1 && ns.flash ? [start("nspire", "Start the TI-Nspire")] : [])),
+      ],
+      roms: () => [
+        intro("ROMs for the TI-73, 81, 82, 83, 83 Plus, 84 Plus, 85 and 86 run in Wabbitemu. TIde reads each one's model and OS."),
+        ...(have.roms.length
+          ? have.roms.map(name => {
+              const info = romInfo[name];
+              const title = info?.model ?? romModels[name] ?? name;
+              const meta = info ? `OS ${info.version} · ${name}` : /\.sav$/i.test(name) ? `Wabbitemu save · ${name}` : `${name} · identifying…`;
+              return imageCard(title, meta, true, [action("Remove…", () => void removeRomImage(name), "danger"), start(`rom:${name}`)]);
+            })
+          : [el("p", { className: "images-empty" }, "No ROMs yet. Add one dumped from your own calculator (16 KB to 4 MB), or a Wabbitemu save (.sav).")]),
+        footer((() => { const b = action("Add a ROM…", () => void chooseImage("rom", b), "primary"); return b; })()),
+      ],
+    };
+    imagesBody.replaceChildren(...sections[imagesTab]());
+    // ROMs added before TIde read them: read them now.
+    if (imagesTab === "roms") void identifyRoms(have.roms);
+    if (imagesTab === "ce") void identifyRoms(have.ces.map(n => `ce/${n}`));
+  }
+
+  /** In place of the screen: what's missing, and the button that opens the images popup. */
+  function showImages(text: string) {
+    setup(text, "images");
+  }
+
+  // The popup, in TIde's dialog frame: header, tabs, the tab's images, and Done.
+  const imagesHint = el("p", { className: "images-sub" });
+  const imagesDialog = el("dialog", { className: "images-dialog", ariaLabel: "Calculator images" },
+    el("header", { className: "images-head" },
+      el("div", {}, el("h2", {}, "Calculator images"), imagesHint),
+      el("button", { type: "button", className: "images-close", title: "Close (Esc)", ariaLabel: "Close", onclick: () => closeImages(true) }, "×")),
+    imagesTabs,
+    imagesBody,
+    el("footer", { className: "images-foot" },
+      el("span", { className: "hint" }, "TIde keeps copies in its data folder; the files you choose stay where they are."),
+      action("Done", () => closeImages(true), "primary")));
+  imagesDialog.addEventListener("cancel", e => { e.preventDefault(); closeImages(true); }); // Escape
+  let imagesOpen = false;
+
+  /** Opens the images popup, with `hint` under its title. */
+  async function openImages(hint = "Choose or replace an image, then start its calculator.") {
+    imagesHint.textContent = hint;
+    known = await files().catch(() => known);
+    if (!imagesOpen) imagesTab = tabFor(known);
+    renderImages();
+    if (!imagesDialog.isConnected) document.body.append(imagesDialog);
+    if (!imagesOpen) { imagesDialog.showModal(); imagesOpen = true; }
+  }
+
+  /** Closes it. `recheck`: with nothing running, look again, so a calculator now set up starts. */
+  function closeImages(recheck: boolean) {
+    if (!imagesOpen) return;
+    imagesOpen = false;
+    imagesDialog.close();
+    if (recheck && !engine && !ui.panel.hidden) void ready();
+  }
+
   function setup(
     text: string,
-    button: "rom" | "connect" | "disconnect" | null,
+    button: "rom" | "connect" | "disconnect" | "images" | null,
   ) {
     ui.setup.hidden = !text;
     ui.setupText.textContent = text;
-    ui.rom.hidden = button !== "rom";
+    // Something to set up means nothing is running.
+    if (text && button !== "disconnect") ui.state.textContent = "";
+    // An image is needed: the button opens the images popup, one place for all of them.
+    ui.rom.hidden = button !== "images" && button !== "rom";
+    ui.rom.textContent = "Calculator images…";
     ui.connect.hidden = button !== "connect";
     ui.disconnect.hidden = button !== "disconnect";
     ui.screen.hidden = !!text;
     ui.reset.hidden = ui.reload.hidden = isReal(choice);
   }
+
 
   async function loadModule<T>(
     script: Uint8Array,
@@ -1047,11 +1394,12 @@ export function createCalc(opts: {
     reject: (e: Error) => void;
     progress: (value: number, total: number) => void;
   } | null = null;
-  async function startCemu(): Promise<Engine | null> {
+  /** Starts CEmu on a stored CE ROM, by its name in ce/. */
+  async function startCemu(name: string): Promise<Engine | null> {
     const [script, wasm, rom] = await Promise.all([
       read("WebCEmu.js"),
       read("WebCEmu.wasm"),
-      read("CE.rom"),
+      read(`ce/${name}`),
     ]);
     // The core's main() reports through these globals, as CEmu's own web page defines them.
     const w = window as unknown as Record<string, unknown>;
@@ -1310,7 +1658,9 @@ export function createCalc(opts: {
     );
     // The OS is still settling just after it turns on, and doesn't answer the link yet.
     await sleep(1500);
-    const l = id === TI_85 || id === TI_86 ? LAYOUT_86 : LAYOUT_CE;
+    // Each model's own keypad (Wabbitemu's model numbers: 0 TI-81, 1 TI-82, 2 TI-83, 3 TI-85, 4 TI-86,
+    // 5 TI-73, 6 and up the TI-83 Plus and 84 Plus family, whose keypad is the CE's).
+    const l = id === TI_85 || id === TI_86 ? LAYOUT_8586 : id === 0 ? LAYOUT_81 : id === 1 ? LAYOUT_82 : id === 2 ? LAYOUT_83 : LAYOUT_CE;
     const key = (k: Key, down: boolean) =>
       emu._wabbit_key(7 - k.row, k.col, down ? 1 : 0);
     const keyFor = (label: string) => l.macro.get(label)!;
@@ -1619,39 +1969,31 @@ export function createCalc(opts: {
     }
   }
 
+  /** The line under the calculator: whose emulator (or link) it is, with its link and license. */
   function setCredit() {
     const kind =
       engine?.kind ??
       (choice === "real"
         ? "usb"
-        : choice.startsWith("rom:")
-          ? "wabbit"
-          : "cemu");
+        : choice === "nspire"
+          ? "firebird"
+          : choice.startsWith("rom:")
+            ? "wabbit"
+            : "cemu");
+    const credits: Record<string, [string, string, string]> = {
+      cemu: ["CEmu", "https://github.com/CE-Programming/CEmu", "GPLv3"],
+      wabbit: ["Wabbitemu", "https://github.com/marwatk/wasmwabbitemu", "GPLv2+"],
+      firebird: ["Firebird", "https://github.com/nspire-emus/firebird", "GPLv3"],
+      usb: ["TILP's libraries (WebTILP)", "https://github.com/debrouxl/tilibs", "GPLv2+"],
+      // The serial link is TIde's own, from the TI Link Protocol Guide.
+      serial: ["TIde, after the TI Link Protocol Guide", "https://merthsoft.com/linkguide/", "TIde's license"],
+    };
+    const [name, href, license] = credits[kind] ?? credits.cemu;
     const credit = $<HTMLAnchorElement>("calc-credit");
     $("calc-credit-what").textContent = isReal(kind) ? "The link" : "Emulation";
-    // The serial link is TIde's own, from the TI Link Protocol Guide.
-    credit.textContent =
-      kind === "cemu"
-        ? "CEmu"
-        : kind === "wabbit"
-          ? "Wabbitemu"
-          : kind === "usb"
-            ? "TILP's libraries (WebTILP)"
-            : "TIde, after the TI Link Protocol Guide";
-    credit.href =
-      kind === "cemu"
-        ? "https://github.com/CE-Programming/CEmu"
-        : kind === "wabbit"
-          ? "https://github.com/marwatk/wasmwabbitemu"
-          : kind === "usb"
-            ? "https://github.com/debrouxl/tilibs"
-            : "https://merthsoft.com/linkguide/";
-    $("calc-license").textContent =
-      kind === "cemu"
-        ? "GPLv3"
-        : kind === "serial"
-          ? "TIde's license"
-          : "GPLv2+";
+    credit.textContent = name;
+    credit.href = href;
+    $("calc-license").textContent = license;
   }
 
   // ── Firebird, for the TI-Nspire CX ──
@@ -2020,19 +2362,16 @@ export function createCalc(opts: {
       return false;
     }
     const rom = choice.startsWith("rom:") ? choice.slice(4) : null;
+    const ce = choice.startsWith("ce:") ? choice.slice(3) : null;
+    setCredit();
     if (choice === "nspire") {
       if (!have.nspire.boot1 || !have.nspire.flash) {
-        setup(
-          "Choose a boot1 image (512 KB) and a flash image (33 or 132 MB) dumped from your own TI-Nspire CX. TIde keeps copies in its data folder.",
-          "rom",
-        );
+        const missing = !have.nspire.boot1 && !have.nspire.flash ? "its boot1 and flash images" : !have.nspire.flash ? "its flash image" : "its boot1 image";
+        showImages(`To run the TI-Nspire CX, choose ${missing} below, dumped from your own calculator. TIde keeps copies in its data folder.`);
         return false;
       }
-    } else if (!rom && !have.rom) {
-      setup(
-        "Choose a ROM dumped from your own calculator: a TI-84 Plus CE, or a TI-73, 81, 82, 83, 83 Plus, 84 Plus, 85 or 86. TIde keeps a copy in its data folder.",
-        "rom",
-      );
+    } else if (!rom && !(ce && have.ces.includes(ce))) {
+      showImages("To run a TI-84 Plus CE or TI-83 Premium CE, choose its ROM below, dumped from your own calculator; or start another calculator you have images for. TIde keeps copies in its data folder.");
       return false;
     }
     setup("", null);
@@ -2048,7 +2387,7 @@ export function createCalc(opts: {
           ? await startFirebird()
           : rom
             ? await startWabbit(rom)
-            : await startCemu();
+            : await startCemu(ce!);
     } catch (err) {
       startError = err instanceof Error ? err.message : String(err);
       log(startError, "err");
@@ -2061,27 +2400,13 @@ export function createCalc(opts: {
           : rom
             ? `Wabbitemu couldn't start with ${rom}. Choose another ROM, or pick a different calculator above.`
             : "CEmu couldn't start with that ROM. Choose a TI-84 Plus CE ROM.";
-      setup(startError ? `${fallback} (${startError})` : fallback, "rom");
+      showImages(startError ? `${fallback} (${startError})` : fallback);
       if (startError) opts.say(startError);
       ui.state.textContent = "";
       return false;
     }
     engine = next;
-    const credit = $<HTMLAnchorElement>("calc-credit");
-    credit.textContent =
-      engine.kind === "cemu"
-        ? "CEmu"
-        : engine.kind === "wabbit"
-          ? "Wabbitemu"
-          : "Firebird";
-    credit.href =
-      engine.kind === "cemu"
-        ? "https://github.com"
-        : engine.kind === "wabbit"
-          ? "https://github.com"
-          : "https://github.com";
-    $("calc-license").textContent =
-      engine.kind === "wabbit" ? "GPLv2+" : "GPLv3";
+    setCredit();
     buildKeypad(engine.layout);
     setScreenSize(engine.width, engine.height);
     ui.state.textContent = "running";
@@ -2126,91 +2451,16 @@ export function createCalc(opts: {
       say("Connect your calculator to send files to it.");
   }
 
+  /** Add a ROM… and the Calculator images… button: the images popup, for every calculator. */
   async function addRom() {
-    if (choice === "nspire") {
-      const boot1 = await opts.pickRom("TI-Nspire CX boot1 image (512 KB)", [
-        "img",
-        "bin",
-        "rom",
-      ]);
-      if (!boot1) return;
-      const flash = await opts.pickRom(
-        "TI-Nspire CX flash image (33 or 132 MB)",
-        ["img", "bin"],
-      );
-      if (!flash) return;
-      try {
-        await invoke("calc_set_nspire", { boot1, flash });
-        say("Saved the Nspire boot1 and flash images.");
-        known = await files();
-        await choose("nspire");
-      } catch (err) {
-        say(String(err));
-      }
-      return;
-    }
-    const path = await opts.pickRom("Calculator ROM or Nspire image", [
-      "rom",
-      "sav",
-      "img",
-      "bin",
-    ]);
-    if (!path) return;
-    try {
-      const stored = await invoke<string>("calc_set_rom", { path });
-      say(
-        stored === "ce"
-          ? "Saved the TI-84 Plus CE ROM."
-          : stored === "nspire"
-            ? "Saved the Nspire image. Add the other one, or pick TI-Nspire CX above, to start it."
-            : `Saved ${stored.slice(4)}.`,
-      );
-      known = await files();
-      await choose(stored);
-    } catch (err) {
-      say(String(err));
-    }
+    await openImages();
   }
 
   ui.model.addEventListener("change", async () => {
     const value = ui.model.value;
     ui.model.value = choice; // until the choice is made
     if (value === "add") return addRom();
-    if (value === "remove") {
-      const name = choice.slice(4);
-      if (
-        !confirm(
-          `Remove ${name} from TIde? The file you added it from stays where it is.`,
-        )
-      )
-        return;
-      try {
-        await invoke("calc_remove_rom", { name });
-        delete romModels[name];
-        remember(NAMES_PREF, romModels);
-        known = await files();
-        await choose("ce");
-      } catch (err) {
-        say(`Could not remove ${name}: ${err}`);
-      }
-      return;
-    }
-    if (value === "remove-nspire") {
-      if (
-        !confirm(
-          "Remove the Nspire boot1 and flash images from TIde? The files you added them from stay where they are.",
-        )
-      )
-        return;
-      try {
-        await invoke("calc_remove_nspire");
-        known = await files();
-        await choose("ce");
-      } catch (err) {
-        say(`Could not remove the Nspire images: ${err}`);
-      }
-      return;
-    }
+    // Removing an image is in the images popup.
     if (value !== choice) await choose(value);
   });
   ui.rom.addEventListener("click", () => void addRom());

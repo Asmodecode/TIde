@@ -78,13 +78,28 @@ export interface Git {
 }
 
 /** The calculator's files: its emulator cores and the user's ROMs. */
+/** What's stored: the CE ROMs, the other models' ROMs, and the TI-Nspire's two images (with their sizes). */
+export interface CalcFileList {
+  /** The CE-family ROMs (TI-84 Plus CE, TI-83 Premium CE, TI-82 AEP), by name in ce/. */
+  ces: string[];
+  /** The other models' ROMs, by name in roms/. */
+  roms: string[];
+  nspire: { boot1: boolean; flash: boolean; boot1_size?: number | null; flash_size?: number | null };
+}
+
 export interface CalcFiles {
-  files(): Promise<{ rom: boolean; roms: string[] }>;
-  /** A core's script or WebAssembly, CE.rom, or "roms/" and a stored ROM's name. */
+  files(): Promise<CalcFileList>;
+  /** A core's script or WebAssembly, "ce/" or "roms/" and a stored ROM's name, or "nspire/boot1.img" / "nspire/flash.img". */
   read(name: string): Promise<Uint8Array>;
-  /** Keeps a ROM; returns "ce", or "rom:" and the name it's kept under. */
+  /** Keeps a ROM; returns "ce:" (a CE's) or "rom:" and the name it's kept under, or "nspire" (an Nspire flash image). */
   setRom(path: string): Promise<string>;
+  /** Removes "ce/" and a CE ROM's name, or another model's ROM by its name. */
   removeRom(name: string): Promise<void>;
+  /** Keeps one of the Nspire's images, after checking its size; returns the size. */
+  setNspireImage(part: "boot1" | "flash", path: string): Promise<number>;
+  removeNspire(): Promise<void>;
+  /** Saves the emulated Nspire's flash back, so what was sent to it stays for next time. */
+  writeNspireFlash(bytes: Uint8Array): Promise<void>;
 }
 
 export interface Fs {
@@ -120,11 +135,15 @@ export interface Fs {
     args: string[],
     env?: Record<string, string>,
   ): Promise<{ ok: boolean; output: string }>;
-  /** Runs a command line in the system shell in `dir`, streaming its output. */
+  /**
+   * Runs a command line in the system shell in `dir`, streaming its output. `env` is added to its
+   * environment (NDLESS_HOME also puts the Ndless SDK's bin folders on PATH).
+   */
   runShell(
     dir: string,
     line: string,
     onOutput: (text: string, err: boolean) => void,
+    env?: Record<string, string>,
   ): ShellRun;
   /** Watches a folder (and all in it) for changes, replacing the one watched before; null stops. */
   watchFolder(path: string | null): Promise<void>;
@@ -196,13 +215,14 @@ function runShell(
   dir: string,
   line: string,
   onOutput: (text: string, err: boolean) => void,
+  env?: Record<string, string>,
 ): ShellRun {
   const id = Math.floor(Math.random() * 0x7fffffff);
   const exited = new Promise<number | null>((resolve) =>
     shellRuns.set(id, { onOutput, resolve }),
   );
   const started = listenShell().then(() =>
-    invoke<void>("shell_run", { id, dir, line }),
+    invoke<void>("shell_run", { id, dir, line, env: env ?? null }),
   );
   started.catch(() => shellRuns.delete(id));
   return {
@@ -218,11 +238,23 @@ export const fs: Fs = isTauri
       desktop: true,
       web: false,
       calc: {
-        files: () => invoke<{ rom: boolean; roms: string[] }>("calc_files"),
+        files: () => invoke<CalcFileList>("calc_files"),
         read: async (name) =>
           new Uint8Array(await invoke<ArrayBuffer>("calc_read", { name })),
         setRom: (path) => invoke<string>("calc_set_rom", { path }),
         removeRom: (name) => invoke<void>("calc_remove_rom", { name }),
+        setNspireImage: (part, path) => invoke<number>("calc_set_nspire_image", { part, path }),
+        removeNspire: () => invoke<void>("calc_remove_nspire"),
+        // As raw bytes, in 8 MB pieces: the last one sets the file's length.
+        async writeNspireFlash(bytes) {
+          const CHUNK = 8 * 1024 * 1024;
+          for (let at = 0; at < bytes.length || at === 0; at += CHUNK) {
+            await invoke("calc_nspire_flash_write", bytes.subarray(at, Math.min(at + CHUNK, bytes.length)), {
+              headers: { "x-tide-offset": String(at), "x-tide-total": String(bytes.length) },
+            });
+            if (!bytes.length) break;
+          }
+        },
       },
       async pickFolder() {
         const { open } = await import("@tauri-apps/plugin-dialog");

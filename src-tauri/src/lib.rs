@@ -172,6 +172,7 @@ pub fn run() {
             calc::calc_files,
             calc::calc_set_rom,
             calc::calc_set_nspire,
+            calc::calc_set_nspire_image,
             calc::calc_remove_rom,
             calc::calc_remove_nspire,
             calc::calc_nspire_flash_write,

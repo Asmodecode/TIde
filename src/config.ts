@@ -6,8 +6,12 @@ import type { Settings } from "./settings";
 export const CONFIG_DIR = ".tide";
 export const CONFIG_FILE = "tide.json";
 
+/** What a project's programs are written in. */
+export type ProjectLanguage = "tibasic" | "c" | "cpp" | "ez80" | "z80" | "tipython" | "py2ez80" | "lua";
+
 export interface ProjectConfig {
   calculator?: "ce" | "plus" | "nspire";
+  language?: ProjectLanguage;
   /** The program Run starts, without prgm. */
   program?: string;
   /** Build command line, such as "make" or "make debug". */
@@ -79,7 +83,12 @@ export const CONFIG_SCHEMA = {
     calculator: {
       enum: ["ce", "plus", "nspire"],
       description:
-        'The calculator this project is for: "ce" for the TI-84 Plus CE, "plus" for the TI-84 Plus, "nspire" for the TI-Nspire CX (Ndless C/C++ projects and Luna-packed .tns scripts). Sets TI-BASIC\'s screen checks and commands, and what Run sends.',
+        'The calculator this project is for: "ce" for the TI-84 Plus CE, "plus" for the TI-84 Plus, "nspire" for the TI-Nspire CX (Ndless C/C++ projects and Luna-packed .tns scripts). It sets which calculator TIde works for while the project is open: TI-BASIC\'s screen checks and commands, and what Build and Run make. Without it, TIde goes by the project\'s files, and asks when they point to more than one calculator.',
+    },
+    language: {
+      enum: ["tibasic", "c", "cpp", "ez80", "z80", "tipython", "py2ez80", "lua"],
+      description:
+        'What the project is written in: "tibasic", "c", "cpp", "ez80" (CE assembly), "z80" (TI-83 Plus and 84 Plus assembly), "tipython" (TI-Python, for the TI-84 Plus CE Python, TI-84 Evo and the Nspire), "py2ez80" (Python compiled to a CE program) or "lua" (Nspire). Its .py files open as py2ez80 in a "py2ez80" project, and its assembly as z80 in a "z80" one. Opening the folder asks for it, with the calculator, when it\'s left out.',
     },
     program: {
       type: "string",
@@ -271,6 +280,8 @@ export function readConfig(text: string): ProjectConfig {
     !["ce", "plus", "nspire"].includes(c.calculator)
   )
     throw new Error('"calculator" is "ce", "plus" or "nspire".');
+  if (c.language !== undefined && !["tibasic", "c", "cpp", "ez80", "z80", "tipython", "py2ez80", "lua"].includes(c.language))
+    throw new Error('"language" is "tibasic", "c", "cpp", "ez80", "z80", "tipython", "py2ez80" or "lua".');
   for (const key of ["prerun", "postrun"] as const) {
     const v = c[key];
     if (

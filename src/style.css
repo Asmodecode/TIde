@@ -599,7 +599,8 @@ body {
 .status[data-kind="c"] {
     background: linear-gradient(90deg, #0f5e73, #0e7490 60%, #0891b2);
 }
-.status[data-kind="python"] {
+.status[data-kind="python"],
+.status[data-kind="tipython"] {
     background: linear-gradient(90deg, #3730a3, #4f46e5 60%, #6366f1);
 }
 .status[data-kind="ez80"] {
@@ -1463,6 +1464,34 @@ body {
 .tab.view-tab {
     font-family: var(--ui);
 }
+/* An image file in the editor (main.ts imageView): a bar with its size and zoom, then the picture
+   on a checkerboard, so transparency shows. Zoomed past 100%, pixels stay sharp. */
+.image-view { position: absolute; inset: 0; display: flex; flex-direction: column; }
+.image-bar {
+    flex: none; display: flex; align-items: center; gap: 12px; padding: 6px 14px;
+    border-bottom: 1px solid var(--rule); font: 12.5px var(--ui); color: var(--muted);
+}
+.image-bar strong { color: var(--ink); font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.image-zoom { margin-left: auto; display: flex; }
+.image-zoom button {
+    font: inherit; color: var(--muted); background: transparent; border: 1px solid var(--rule); border-left: none;
+    padding: 3px 10px; cursor: pointer; font-variant-numeric: tabular-nums;
+}
+.image-zoom button:first-child { border-left: 1px solid var(--rule); border-radius: 3px 0 0 3px; }
+.image-zoom button:last-child { border-radius: 0 3px 3px 0; margin-left: 6px; border-left: 1px solid var(--rule); border-radius: 3px; }
+.image-zoom button:nth-last-child(2) { border-radius: 0 3px 3px 0; }
+.image-zoom .image-level { min-width: 58px; color: var(--ink); }
+.image-zoom button:hover { color: var(--ink); border-color: var(--key); }
+.image-zoom button.on { color: var(--ink); background: var(--body); }
+.image-stage {
+    flex: 1; min-height: 0; overflow: auto; display: grid; padding: 16px; outline: none;
+    --check: color-mix(in srgb, var(--rule) 45%, transparent);
+    background: repeating-conic-gradient(var(--check) 0 25%, transparent 0 50%) 0 0 / 16px 16px;
+}
+/* margin: auto centres it while it's smaller than the stage, and lets it scroll from its edge when bigger. */
+.image-stage img { margin: auto; max-width: none; box-shadow: 0 0 0 1px var(--rule); }
+.image-stage.sharp img { image-rendering: pixelated; }
+.image-stage .notice { color: var(--warn); font: 13px var(--ui); }
 .file-view,
 .settings-page {
     max-width: 900px;
@@ -1684,6 +1713,18 @@ body {
 .status select[hidden] {
     display: none;
 }
+/* The Scripts and encoding menus stay the size of their label ("Scripts", the file's encoding),
+   however long a script's command or an encoding's name is in the list that opens; WebKit,
+   without field-sizing, caps them instead. */
+.status #status-scripts,
+.status #status-encoding {
+    field-sizing: content;
+    max-width: 8em;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+/* An encoding's own name can be long ("Central European (Windows 1250)"); its tooltip has it whole. */
+.status #status-encoding { max-width: 14em; }
 .status select option,
 .status select optgroup {
     color: var(--ink);
@@ -2431,4 +2472,283 @@ body {
     font-size: 11.5px;
     color: var(--ok) !important;
     font-weight: 600;
+}
+
+
+/* ── The calculator images popup (calc.ts): header, tabs, image cards, footer ── */
+.images-dialog {
+    margin: auto; width: min(640px, 94vw); max-height: min(640px, 90vh); padding: 0;
+    display: flex; flex-direction: column; overflow: hidden;
+    color: var(--ink); background: var(--paper);
+    border: 1px solid var(--rule); border-radius: 10px;
+    box-shadow: 0 24px 60px rgba(0, 0, 0, .45);
+}
+.images-dialog:not([open]) { display: none; }
+.images-dialog::backdrop { background: rgba(3, 8, 20, .6); backdrop-filter: blur(2px); }
+.images-head { display: flex; align-items: flex-start; gap: 16px; padding: 18px 20px 12px; }
+.images-head > div { flex: 1; min-width: 0; }
+.images-head h2 { font: 600 17px var(--ui); }
+.images-sub { margin-top: 4px; font-size: 12.5px; color: var(--muted); }
+.images-close { flex: none; width: 28px; height: 28px; font-size: 18px; line-height: 1; color: var(--muted); background: none; border: 0; border-radius: 6px; cursor: pointer; }
+.images-close:hover { color: var(--ink); background: var(--body); }
+
+.images-tabs { display: flex; gap: 4px; padding: 0 20px; border-bottom: 1px solid var(--rule); }
+.images-tab {
+    display: flex; align-items: center; gap: 7px; padding: 9px 12px 10px; margin-bottom: -1px;
+    font: 500 12.5px var(--ui); color: var(--muted); background: none;
+    border: 0; border-bottom: 2px solid transparent; cursor: pointer; white-space: nowrap;
+}
+.images-tab:hover { color: var(--ink); }
+.images-tab[aria-selected="true"] { color: var(--ink); border-bottom-color: var(--key); }
+.images-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--rule); flex: none; }
+.images-tab.ready .images-dot { background: var(--ok); }
+
+.images-body { flex: 1; min-height: 0; overflow-y: auto; padding: 16px 20px; display: flex; flex-direction: column; gap: 10px; }
+.images-intro { font-size: 12.5px; color: var(--muted); margin-bottom: 2px; }
+.images-empty { padding: 22px 12px; text-align: center; font-size: 12.5px; color: var(--muted); border: 1px dashed var(--rule); border-radius: 8px; }
+
+.image-card {
+    display: grid; grid-template-columns: auto minmax(0, 1fr) auto auto; align-items: center; gap: 12px;
+    padding: 12px 14px; background: var(--panel); border: 1px solid var(--rule); border-radius: 8px;
+}
+.image-card.missing { border-style: dashed; }
+.image-icon { display: grid; place-items: center; width: 34px; height: 34px; border-radius: 8px; color: var(--muted); background: var(--body); }
+.image-card.in .image-icon { color: var(--ok); background: color-mix(in srgb, var(--ok) 14%, transparent); }
+.image-icon svg { width: 20px; height: 20px; fill: none; stroke: currentColor; stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round; }
+.image-main { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.image-main strong { font: 600 13px var(--ui); }
+.image-meta { font-size: 11.5px; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.image-pill { font-size: 11px; font-weight: 600; padding: 2px 8px; border-radius: 999px; white-space: nowrap; color: var(--muted); background: var(--body); }
+.image-card.in .image-pill { color: var(--ok); background: color-mix(in srgb, var(--ok) 14%, transparent); }
+.image-actions { display: flex; gap: 6px; }
+
+.image-btn { font: 500 12.5px var(--ui); padding: 6px 12px; color: var(--ink); background: var(--body); border: 1px solid var(--rule); border-radius: 6px; cursor: pointer; white-space: nowrap; }
+.image-btn:hover:not(:disabled) { border-color: var(--key); }
+.image-btn.primary { color: var(--navy); background: var(--key); border-color: var(--key); font-weight: 600; }
+.image-btn.primary:hover:not(:disabled) { filter: brightness(1.08); }
+.image-btn.danger { color: var(--danger); background: none; border-color: transparent; }
+.image-btn.danger:hover:not(:disabled) { border-color: color-mix(in srgb, var(--danger) 50%, transparent); background: color-mix(in srgb, var(--danger) 8%, transparent); }
+.image-btn:disabled { opacity: .55; cursor: default; }
+.images-section-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 2px; }
+
+.images-foot { display: flex; align-items: center; gap: 12px; padding: 12px 20px; border-top: 1px solid var(--rule); background: var(--panel); }
+.images-foot .hint { flex: 1; font-size: 11.5px; }
+
+/* Narrow windows: the buttons go under the image. */
+@media (max-width: 560px) {
+    .image-card { grid-template-columns: auto minmax(0, 1fr) auto; }
+    .image-actions { grid-column: 1 / -1; justify-content: flex-end; }
+}
+
+/* ── The TI-Nspire CX's keyboard (calc.ts's nspireKeypad), laid out as on the calculator, in
+   TIde's colours: the navy of the CE keypad, number keys a step lighter, operators and enter in
+   TIde's blue, ctrl and shift in the waves' sky blue, and each key's shift or ctrl function small
+   above it. Light mode has its own palette. ── */
+.calc-keypad.nspire {
+    --ns-key: #1b2f58; --ns-key-edge: #0a1530; --ns-num: #2b4170; --ns-op: #1e40af;
+    --ns-mod: var(--wave-top); --ns-mod-ink: var(--navy); --ns-top: var(--key); --ns-ink: var(--ink);
+    --ns-pad: #0c1934; --ns-pad-ring: #2a457a;
+    gap: 1.4cqh; padding: 2.4cqh 3.2cqw;
+}
+:root[data-theme="light"] .calc-keypad.nspire {
+    --ns-key: #ffffff; --ns-key-edge: #b9c5d8; --ns-num: #f8fafd; --ns-op: #0369a1;
+    --ns-mod: #38bdf8; --ns-mod-ink: #0b1730; --ns-top: #0369a1;
+    --ns-pad: #e6ecf5; --ns-pad-ring: #b9c5d8;
+}
+.calc-keypad.nspire .key {
+    display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 0.2cqh;
+    padding: 0; line-height: 1.05;
+    font: 600 clamp(8px, 2.9cqh, 14px) var(--ui); color: var(--ns-ink);
+    background: var(--ns-key); box-shadow: 0 2px 0 var(--ns-key-edge); border-radius: 6px;
+}
+:root[data-theme="light"] .calc-keypad.nspire .key { box-shadow: inset 0 0 0 1px var(--rule), 0 2px 0 var(--ns-key-edge); }
+.calc-keypad.nspire .key:active { transform: translateY(1px); box-shadow: 0 1px 0 var(--ns-key-edge); }
+.calc-keypad.nspire .key small { font-size: 0.62em; font-weight: 500; color: var(--ns-top); white-space: nowrap; }
+.calc-keypad.nspire .key.num { background: var(--ns-num); font-size: clamp(10px, 3.6cqh, 18px); }
+.calc-keypad.nspire .key.op { background: var(--ns-op); color: #fff; }
+.calc-keypad.nspire .key.op small { color: #bae6fd; }
+.calc-keypad.nspire .key.ctrl, .calc-keypad.nspire .key.shift { background: var(--ns-mod); color: var(--ns-mod-ink); }
+.calc-keypad.nspire .key.ctrl small, .calc-keypad.nspire .key.shift small { color: var(--ns-mod-ink); opacity: .75; }
+
+.ns-top { flex: 2.6; min-height: 0; display: grid; grid-template-columns: 1fr 2.4fr 1fr; gap: 2cqw; }
+.ns-side { display: flex; flex-direction: column; gap: 1cqh; min-height: 0; }
+.ns-touchpad {
+    display: grid; grid-template-columns: 1fr 1.3fr 1fr; grid-template-rows: 1fr 1.3fr 1fr;
+    grid-template-areas: ". up ." "left click right" ". down ."; gap: 0;
+    border-radius: 18px; overflow: hidden;
+    background: var(--ns-pad);
+    box-shadow: inset 0 0 0 1px var(--ns-pad-ring);
+}
+.calc-keypad.nspire .ns-touchpad .key {
+    background: none; box-shadow: none; border-radius: 0; color: var(--muted); font-size: clamp(8px, 2.6cqh, 13px);
+}
+.calc-keypad.nspire .ns-touchpad .key:hover { background: color-mix(in srgb, var(--key) 10%, transparent); filter: none; }
+.calc-keypad.nspire .ns-touchpad .key:active { background: color-mix(in srgb, var(--key) 22%, transparent); transform: none; }
+.ns-touch-0 { grid-area: up; } .ns-touch-1 { grid-area: left; } .ns-touch-2 { grid-area: right; } .ns-touch-3 { grid-area: down; }
+/* The click in the middle: a square, centred in its cell. */
+.calc-keypad.nspire .ns-touchpad .ns-touch-4 { grid-area: click; place-self: center; height: 62%; width: auto; aspect-ratio: 1; border-radius: 6px; box-shadow: inset 0 0 0 1px var(--ns-pad-ring); }
+
+.ns-bar { flex: 0.9; min-height: 0; display: flex; gap: 1.6cqw; }
+.ns-bar .key { flex: 0 0 15%; }
+.ns-gap { flex: 1; }
+
+.ns-middle { flex: 3.1; min-height: 0; display: grid; grid-template-columns: 1fr 1.35fr 1fr; gap: 2.2cqw; }
+.ns-pairs { display: flex; flex-direction: column; gap: 1cqh; min-height: 0; }
+.ns-pair { flex: 1; display: flex; gap: 1cqw; min-height: 0; }
+.ns-num { display: grid; grid-template-columns: repeat(3, 1fr); grid-template-rows: repeat(4, 1fr); gap: 1cqh 1.2cqw; min-height: 0; }
+.ns-ops { display: flex; flex-direction: column; gap: 1cqh; min-height: 0; }
+.ns-ops .ns-pairs { flex: 3; }
+.ns-ops .ns-enter { flex: 1; }
+
+.ns-alpha { flex: 2.1; min-height: 0; display: grid; grid-template-columns: repeat(9, 1fr); grid-template-rows: repeat(4, 1fr); gap: 0.8cqh 0.8cqw; }
+.calc-keypad.nspire .ns-alpha .key { font-size: clamp(8px, 2.5cqh, 13px); border-radius: 4px; }
+.ns-alpha .ns-space { grid-column: span 2; }
+
+/* The TI-84's keys (calc.ts): what 2nd and alpha make of each key, printed on the body above it
+   as on the calculator: the 2nd function left, in the 2nd key's blue; the alpha letter right, in
+   the alpha key's green. While 2nd or alpha is pressed and waiting for the next key, its labels
+   light up and the others fade. */
+.key-cell { flex: 1; min-width: 0; min-height: 0; display: flex; flex-direction: column; gap: 0.35cqh; }
+.key-cell > .key { flex: 1; }
+.key-over {
+    flex: none; height: clamp(9px, 2.4cqh, 13px); display: flex; justify-content: space-between; align-items: flex-end; gap: 3px;
+    padding: 0 1px; font: 700 clamp(7px, 1.9cqh, 11px) / 1 var(--ui); letter-spacing: .01em;
+}
+.key-over span { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; transition: color .12s, opacity .12s; }
+.key-over .key-2nd { color: var(--wave-top); min-width: 0; }
+.key-over .key-alpha { color: #34d399; flex: none; }
+:root[data-theme="light"] .key-over .key-2nd { color: #0369a1; }
+:root[data-theme="light"] .key-over .key-alpha { color: #15803d; }
+
+/* 2nd or alpha armed: its labels light up, the others fade, and its key glows. */
+.calc-keypad[data-armed="2nd"] .key-over .key-2nd { color: #7dd3fc; text-shadow: 0 0 6px color-mix(in srgb, var(--wave-top) 60%, transparent); }
+.calc-keypad[data-armed="2nd"] .key-over .key-alpha { opacity: .25; }
+.calc-keypad[data-armed="alpha"] .key-over .key-alpha { color: #6ee7b7; text-shadow: 0 0 6px rgba(52, 211, 153, .55); }
+.calc-keypad[data-armed="alpha"] .key-over .key-2nd { opacity: .25; }
+:root[data-theme="light"] .calc-keypad[data-armed="2nd"] .key-over .key-2nd { color: #0284c7; text-shadow: none; }
+:root[data-theme="light"] .calc-keypad[data-armed="alpha"] .key-over .key-alpha { color: #16a34a; text-shadow: none; }
+.calc-keypad[data-armed="2nd"] .key[data-modifier="2nd"],
+.calc-keypad[data-armed="alpha"] .key[data-modifier="alpha"] { box-shadow: 0 0 0 2px var(--paper), 0 0 0 4px currentColor; filter: brightness(1.15); }
+
+/* With the labels off the keys, each key's own label can be bigger. */
+.keyrow .key-cell > .key { font-size: clamp(10px, 3.6cqh, 17px); }
+.keyrow .key-cell > .key.fn { font-size: clamp(9px, 2.9cqh, 14px); }
+
+/* A calculator's proportions: the TI-84's keypad is taller than wide, so in a wide pane the keys
+   keep their shape and the keypad sits in the middle, instead of stretching into thin strips. The
+   label strips space the rows, so the gaps between rows can be small; the arrow pad, which spans
+   two rows, takes the same gap into its height. */
+.calc-keypad:not(.nspire) { gap: 1.2cqh; align-items: center; }
+.calc-keypad:not(.nspire) .keyrow { width: min(100%, 108cqh); }
+.calc-keypad:not(.nspire) .arrows { height: calc(200% + 1.2cqh); }
+/* The top row (the graph keys, or F1–F5) as tall as the others: with its labels above, a shorter row left the keys too short. */
+.calc-keypad:not(.nspire) .keyrow:first-child { flex: 1; }
+.key.fn { background: #22396a; }
+:root[data-theme="light"] .key.fn { background: #e6ecf5; }
+
+/* Setting up a folder (main.ts askSetup): the images popup's frame, in three numbered sections in
+   the order a project is set up and run: its calculator, its language, then what Run does, as a
+   timeline with the user's prerun and postrun steps where they happen. */
+.setup-dialog { width: min(680px, 94vw); max-height: min(800px, 92vh); }
+.setup-dialog .image-btn:disabled { opacity: .5; cursor: default; }
+.setup-body { gap: 22px; padding-top: 16px; min-height: 300px; }
+/* Where the popup is: a numbered step per page, joined by a line; done steps get a tick and can be gone back to. */
+.setup-progress { display: flex; align-items: center; gap: 0; margin-top: 14px; list-style: none; padding: 0; }
+.setup-progress li { display: flex; align-items: center; flex: 1; }
+.setup-progress li:last-child { flex: none; }
+.setup-progress li:not(:last-child)::after { content: ""; flex: 1; height: 2px; margin: 0 10px; border-radius: 1px; background: var(--rule); }
+.setup-progress li.done:not(:last-child)::after { background: var(--key); }
+.setup-progress button {
+    display: flex; align-items: center; gap: 8px; padding: 0; font: 500 12.5px var(--ui); color: var(--muted);
+    background: none; border: 0; cursor: pointer; white-space: nowrap;
+}
+.setup-progress button:disabled { cursor: default; }
+.setup-progress .now button { color: var(--ink); font-weight: 600; }
+.setup-progress .done button:hover { color: var(--ink); }
+.setup-progress-num {
+    display: grid; place-items: center; width: 22px; height: 22px; border-radius: 50%;
+    font: 700 11px var(--ui); color: var(--muted); border: 1.5px solid var(--rule);
+}
+.setup-progress .now .setup-progress-num { color: var(--navy); background: var(--key); border-color: var(--key); }
+.setup-progress .done .setup-progress-num { color: var(--key); border-color: var(--key); }
+.setup-dialog .setup-summary { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.setup-dialog .setup-later { margin-right: auto; }
+.setup-dialog .images-foot .image-btn[hidden] { display: none; }
+.setup-section { display: flex; flex-direction: column; gap: 10px; }
+.setup-head { display: flex; align-items: flex-start; gap: 10px; }
+.setup-num {
+    flex: none; display: grid; place-items: center; width: 22px; height: 22px; margin-top: 1px; border-radius: 50%;
+    font: 700 11.5px var(--ui); color: var(--navy); background: var(--key);
+}
+.setup-head h3 { font: 600 13.5px var(--ui); }
+.setup-head p { font-size: 12px; color: var(--muted); margin-top: 1px; }
+.setup-choices { display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: 8px; }
+.setup-choice {
+    display: flex; flex-direction: column; align-items: flex-start; gap: 3px; text-align: left; min-width: 0;
+    padding: 10px 12px; font: 12.5px var(--ui); color: var(--ink); background: var(--panel);
+    border: 1px solid var(--rule); border-radius: 8px; cursor: pointer; transition: border-color .12s, background .12s;
+}
+.setup-choice:hover { border-color: color-mix(in srgb, var(--key) 60%, var(--rule)); }
+.setup-choice[aria-pressed="true"] { border-color: var(--key); box-shadow: 0 0 0 1px var(--key); background: color-mix(in srgb, var(--key) 10%, var(--panel)); }
+.setup-choice-top { display: flex; align-items: center; gap: 6px; width: 100%; }
+.setup-choice strong { font-weight: 600; flex: 1; min-width: 0; }
+.setup-badge {
+    flex: none; font: 600 10px var(--ui); letter-spacing: .02em; padding: 1px 6px; border-radius: 999px;
+    color: var(--ok); background: color-mix(in srgb, var(--ok) 15%, transparent);
+}
+.setup-note { font-size: 11px; color: var(--muted); line-height: 1.35; }
+.setup-why { font-size: 11px; color: var(--ok); line-height: 1.35; }
+.setup-more {
+    display: grid; place-items: center; font: 12px var(--ui); color: var(--key); background: none;
+    border: 1px dashed var(--rule); border-radius: 8px; padding: 10px 12px; cursor: pointer; min-height: 44px;
+}
+.setup-more:hover { border-color: var(--key); }
+
+/* What Run does: a line down the left through each stage TIde takes, and the user's steps as lanes on it. */
+.setup-timeline { position: relative; display: flex; flex-direction: column; gap: 8px; margin-left: 10px; padding-left: 22px; }
+.setup-timeline::before { content: ""; position: absolute; left: 0; top: 8px; bottom: 8px; width: 2px; background: var(--rule); border-radius: 1px; }
+.setup-stage { position: relative; display: flex; align-items: center; gap: 8px; font-size: 12.5px; color: var(--muted); min-height: 20px; }
+.setup-dot {
+    position: absolute; left: -27px; width: 12px; height: 12px; border-radius: 50%;
+    background: var(--paper); border: 2px solid color-mix(in srgb, var(--key) 70%, var(--rule));
+}
+.setup-lane { position: relative; padding: 10px 12px; background: var(--panel); border: 1px solid var(--rule); border-radius: 8px; }
+.setup-lane::before { content: ""; position: absolute; left: -26px; top: 16px; width: 10px; height: 10px; border-radius: 3px; background: var(--key); }
+.setup-lane-head { display: flex; align-items: baseline; gap: 8px; margin-bottom: 8px; }
+.setup-lane-head strong { font: 600 12.5px var(--ui); }
+.setup-lane-head span { font-size: 11.5px; color: var(--muted); }
+.setup-steplist { display: flex; flex-direction: column; gap: 8px; }
+.setup-steps { display: flex; flex-direction: column; gap: 6px; }
+.setup-step { display: grid; grid-template-columns: 64px minmax(0, 1fr) auto; align-items: center; gap: 8px; }
+.setup-step-kind {
+    justify-self: start; font: 600 10.5px var(--ui); letter-spacing: .02em; padding: 2px 7px; border-radius: 999px;
+    color: var(--key); background: color-mix(in srgb, var(--key) 14%, transparent);
+}
+.setup-step-kind.kind-shell { color: var(--ink); background: color-mix(in srgb, var(--ink) 10%, transparent); }
+.setup-step-kind.kind-wait { color: var(--muted); background: color-mix(in srgb, var(--muted) 14%, transparent); }
+.setup-step input, .setup-step select {
+    font: 12.5px var(--mono); color: var(--ink); background: var(--paper); border: 1px solid var(--rule);
+    border-radius: 6px; padding: 5px 8px; min-width: 0; width: 100%;
+}
+.setup-step input:focus, .setup-step select:focus { outline: none; border-color: var(--key); }
+.setup-step-tools { display: flex; opacity: .55; transition: opacity .12s; }
+.setup-step:hover .setup-step-tools, .setup-step:focus-within .setup-step-tools { opacity: 1; }
+.setup-step-btn {
+    width: 24px; height: 24px; font: 13px var(--ui); color: var(--muted); background: none;
+    border: 1px solid transparent; border-radius: 6px; cursor: pointer;
+}
+.setup-step-btn:hover:not(:disabled) { color: var(--ink); border-color: var(--rule); }
+.setup-step-btn.remove:hover:not(:disabled) { color: var(--danger); }
+.setup-step-btn:disabled { opacity: .3; cursor: default; }
+.setup-adds { display: flex; flex-wrap: wrap; gap: 6px; }
+.setup-add {
+    font: 500 11.5px var(--ui); color: var(--muted); background: none; border: 1px dashed var(--rule);
+    border-radius: 999px; padding: 3px 10px; cursor: pointer;
+}
+.setup-add:hover { color: var(--key); border-color: var(--key); border-style: solid; }
+.setup-empty { font-size: 12px; color: var(--muted); }
+@media (max-width: 560px) {
+    .setup-choices { padding-left: 0; }
+    .setup-step { grid-template-columns: minmax(0, 1fr) auto; }
+    .setup-step-kind { grid-column: 1 / -1; }
 }

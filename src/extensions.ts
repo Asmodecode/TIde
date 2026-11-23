@@ -18,6 +18,7 @@ const BUILT_IN_NAMES: Record<string, string> = {
   c: "CE C",
   ez80: "eZ80 assembly",
   python: "py2ez80",
+  tipython: "TI-Python",
 };
 
 export interface Snippet {
@@ -962,6 +963,7 @@ export const EXTENSION_SCHEMA = {
             "cpp",
             "ez80",
             "python",
+            "tipython",
             "lua",
             "json",
             "markdown",
@@ -1002,7 +1004,7 @@ interface Tide {
     hover(language: string, provider: { provideHover(model: any, position: any): any }): Disposable;
     signatureHelp(language: string, provider: { provideSignatureHelp(model: any, position: any): any; signatureHelpTriggerCharacters?: string[] }): Disposable;
     /** Turns on TIde's own IntelliSense for a language: completions, hover help, signature help and more. */
-    builtIn(language: "tibasic" | "c" | "ez80" | "python"): Disposable;
+    builtIn(language: "tibasic" | "c" | "ez80" | "python" | "tipython"): Disposable;
     /** Shows problems in a file (squiggles and the status bar). */
     markers(model: any, markers: { startLineNumber: number; startColumn: number; endLineNumber: number; endColumn: number; message: string; severity: number }[]): void;
   };

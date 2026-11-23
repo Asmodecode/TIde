@@ -37,7 +37,7 @@ export const isCeOnly = (insert: string) => CE_ONLY_NAMES.has(insert);
 
 /** The TI-BASIC catalog for a calculator: the Plus leaves out commands it doesn't have. */
 export function tiCatalog(target: Target) {
-  if (target === "ce") return CATALOG;
+  if (target !== "plus") return CATALOG;
   return CATALOG.map(g => ({ ...g, entries: g.entries.filter(e => !isCeOnly(e.insert)) }));
 }
 
@@ -76,6 +76,9 @@ export function estimateBytes(source: string): number {
 /** Monaco language id for a file name, using the extensions and file names Monaco already knows. */
 export function languageFor(file: string): string {
   const lower = file.toLowerCase();
+  // .py is the calculator's TI-Python source format. py2ez80 remains available through Monaco's
+  // separate Python language id for projects which explicitly use that transpiler.
+  if (lower.endsWith(".py")) return "tipython";
   const dot = lower.lastIndexOf(".");
   const ext = dot > 0 ? lower.slice(dot) : "";
   if (ASM_EXTENSIONS.includes(ext)) return ASM_LANG; // before Monaco, which reads .s as MIPS

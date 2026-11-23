@@ -9,6 +9,9 @@ import { registerAsm } from "./asm-support";
 import { registerCChecks } from "./c-check";
 import { registerAsmChecks } from "./asm-check";
 import { registerPyChecks } from "./py-check";
+import { registerTiPython, registerTiPythonLanguage } from "./tipython-support";
+
+registerTiPythonLanguage();
 
 /** The languages with built-in support, by id. Each one's registration. It may return more to dispose: checks, quick fixes, the outline. */
 export const BUILT_IN_LANGUAGES: Record<string, () => void | monaco.IDisposable[]> = {
@@ -16,6 +19,7 @@ export const BUILT_IN_LANGUAGES: Record<string, () => void | monaco.IDisposable[
   c: () => { registerC(); return registerCChecks(); },
   ez80: () => { registerAsm(); return registerAsmChecks(); },
   python: () => { registerPy2ez80(); return registerPyChecks(); },
+  tipython: () => registerTiPython(),
 };
 
 /** TI-BASIC's labels in the outline (Ctrl+Shift+O), to jump between parts of a program. */

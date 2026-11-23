@@ -191,26 +191,7 @@ pub fn run_command(
         Command::new(&command)
     };
     cmd.args(&args).current_dir(&dir);
-    if let Some(env) = env {
-        if let Some(home) = env.get("NDLESS_HOME") {
-            if !env.contains_key("PATH") {
-                let sep = if cfg!(windows) { ";" } else { ":" };
-                let mut bins: Vec<String> = ["bin", "ndless-sdk/bin"]
-                    .iter()
-                    .map(|sub| std::path::Path::new(home).join(sub))
-                    .filter(|p| p.is_dir())
-                    .map(|p| p.to_string_lossy().into_owned())
-                    .collect();
-                if !bins.is_empty() {
-                    if let Ok(path) = std::env::var("PATH") {
-                        bins.push(path);
-                        cmd.env("PATH", bins.join(sep));
-                    }
-                }
-            }
-        }
-        cmd.envs(env);
-    }
+    crate::shell::add_env(&mut cmd, env);
     #[cfg(windows)]
     {
         use std::os::windows::process::CommandExt;
