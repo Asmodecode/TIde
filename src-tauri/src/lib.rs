@@ -11,6 +11,7 @@ mod project;
 mod pty;
 mod serial;
 mod shell;
+mod update;
 mod watch;
 
 const EXTENSION: &str = ".tide.txt";
@@ -144,6 +145,7 @@ pub fn run() {
         .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_process::init())
         .invoke_handler(tauri::generate_handler![
+            update::update_check,
             save_program,
             load_program,
             delete_program,

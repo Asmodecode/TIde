@@ -1,9 +1,12 @@
 name: Build
 
 # Three kinds of release:
-# - every push to main refreshes the rolling "latest" prerelease (installers only, no latest.json);
+# - every push to main refreshes the rolling "latest" prerelease: a nightly build, versioned as the
+#   next patch with the run number (2.0.1-75: above 2.0.0, below 2.0.1), with nightly.json, which
+#   installed apps on the Nightly update channel read (releases/download/latest/nightly.json);
 # - a version tag (v1.5.0) builds that version as a stable release, with latest.json, which installed
-#   apps read to update. The app checks releases/latest/download/latest.json: the newest stable release.
+#   apps on the Stable channel read: releases/latest/download/latest.json, the newest stable release.
+# The web version has a stable and a nightly too, each at its own address (see the web job).
 # - a web version tag (v1.6.1-web) builds and publishes only the web version: no installers, and its
 #   release is never marked latest, so installed apps keep updating from the last stable release.
 on:
@@ -72,6 +75,11 @@ jobs:
                 --title "TIde $tag" --notes "Building TIde $version…"
             fi
           else
+            # A nightly: the next patch version, with this run's number after it. Windows' MSI takes
+            # only a number there, of at most 65535.
+            IFS=. read -r major minor patch <<< "${version%%-*}"
+            version="$major.$minor.$((patch + 1))-$GITHUB_RUN_NUMBER"
+            echo "version=$version" >> "$GITHUB_OUTPUT"
             echo "release=latest" >> "$GITHUB_OUTPUT"
             echo "stable=false" >> "$GITHUB_OUTPUT"
             if ! gh release view latest --repo "$REPO" >/dev/null 2>&1; then
@@ -219,13 +227,18 @@ jobs:
 
   web:
     name: Web version (GitHub Pages)
-    # Each stable release also builds TIde's web version, commits it (JavaScript and WebAssembly
-    # included) to the gh-pages branch, and publishes the same build to GitHub Pages at
-    # https://<owner>.github.io/TIde/ (Settings > Pages > Source: GitHub Actions). The branch holds
-    # only the latest build: each one replaces it, so old builds' large files don't pile up.
-    if: needs.prepare.outputs.stable == 'true' || needs.prepare.outputs.web == 'true'
+    # TIde's web version, on GitHub Pages (Settings > Pages > Source: GitHub Actions), in two places:
+    # - stable, at https://<owner>.github.io/TIde/, from each stable release (and web version tag);
+    # - nightly, at https://<owner>.github.io/TIde/nightly/, from every push to main.
+    # The gh-pages branch holds the whole site, both builds, JavaScript and WebAssembly included,
+    # as one commit: each deploy replaces only its own part (the nightly/ folder, or everything else)
+    # and force-pushes, so old builds' large files don't pile up. Pages then publishes the branch's tree.
     needs: prepare
     runs-on: ubuntu-latest
+    # One deploy at a time, so a stable and a nightly never overwrite each other's half of the site.
+    concurrency:
+      group: pages
+      cancel-in-progress: false
     permissions:
       contents: write
       pages: write
@@ -233,6 +246,8 @@ jobs:
     environment:
       name: github-pages
       url: ${{ steps.deploy.outputs.page_url }}
+    env:
+      CHANNEL: ${{ (needs.prepare.outputs.stable == 'true' || needs.prepare.outputs.web == 'true') && 'stable' || 'nightly' }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -240,20 +255,35 @@ jobs:
           node-version: 22
           cache: npm
       - run: npm ci
-      # The C compiler is too big for the repository: it comes from the web-toolchain release
-      # (the Web toolchain workflow builds it). Without it, the site builds everything but C.
       # The C compiler (ez80-clang for WebAssembly) is in the repository, in toolchain/clang/dist.
       - name: Check ez80-clang is there
         run: |
           if [ ! -s toolchain/clang/dist/clang.wasm ] || [ ! -s toolchain/clang/dist/clang.js ]; then
             echo "::warning::toolchain/clang/dist has no clang.js and clang.wasm, so the web version can't compile C."
           fi
-      - run: npm run build:web
-      - name: Commit the built site to gh-pages
+      - name: Build the web version
+        run: |
+          if [ "$CHANNEL" = nightly ]; then export TIDE_WEB_BASE=/TIde/nightly/; fi
+          npm run build:web
+      - name: Put this build in its place in the site, and commit the site to gh-pages
         env:
           VERSION: ${{ needs.prepare.outputs.version }}
+          REMOTE: https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}.git
         run: |
-          cd dist-web
+          set -euo pipefail
+          # The site as it is: both builds. (None yet, the first time.)
+          git clone -q --depth 1 --branch gh-pages "$REMOTE" site 2>/dev/null || mkdir site
+          rm -rf site/.git
+          if [ "$CHANNEL" = stable ]; then
+            # Everything but nightly/ is the stable build's.
+            find site -mindepth 1 -maxdepth 1 ! -name nightly -exec rm -rf {} +
+            cp -a dist-web/. site/
+          else
+            rm -rf site/nightly
+            mkdir -p site/nightly
+            cp -a dist-web/. site/nightly/
+          fi
+          cd site
           # GitHub refuses files over 100 MB; one that big is left out, with a warning, rather than failing the push.
           while IFS= read -r big; do
             echo "::warning::Left $big out of gh-pages: GitHub doesn't take files over 100 MB."
@@ -265,12 +295,12 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add -A
-          git commit -q -m "TIde $VERSION web version, built from ${GITHUB_SHA::7}"
-          git push --force "https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}.git" gh-pages
+          git commit -q -m "TIde $VERSION web version ($CHANNEL), built from ${GITHUB_SHA::7}"
+          git push -q --force "$REMOTE" gh-pages
           rm -rf .git
       - uses: actions/upload-pages-artifact@v3
         with:
-          path: dist-web
+          path: site
       - id: deploy
         uses: actions/deploy-pages@v4
 
@@ -300,19 +330,26 @@ jobs:
           git tag -f latest "$SHA"
           git push -f origin refs/tags/latest
 
-          printf '%s\n\n---\nTIde %s, built from commit %s. A rolling build of main: installed apps update from tagged releases, not this one.\n' \
+          printf '%s\n\n---\nTIde %s, a nightly build of main, from commit %s. Installed apps on the Nightly update channel (Settings → Updates) update to it; the Stable channel updates from tagged releases.\n' \
             "$(cat RELEASE_NOTES.md)" "$VERSION" "$SHA" > body.md
           gh release edit latest --repo "$REPO" --title "TIde v$VERSION (latest build)" --notes-file body.md --prerelease
 
-          # Anything not uploaded by this run is left over from an older build, latest.json included:
-          # only tagged releases have one.
+          # Anything not uploaded by this run is left over from an older build, latest.json included
+          # (only tagged releases have one) and the last nightly.json, written again below.
           gh release view latest --repo "$REPO" --json assets \
-            | jq -r --arg started "$STARTED" '.assets[] | select(.updatedAt < $started or .name == "latest.json") | .name' \
+            | jq -r --arg started "$STARTED" '.assets[] | select(.updatedAt < $started or .name == "latest.json" or .name == "nightly.json") | .name' \
             | while IFS= read -r asset; do
                 [ -z "$asset" ] && continue
                 echo "Removing stale asset: $asset"
                 gh release delete-asset latest "$asset" --repo "$REPO" --yes
               done
+
+          # nightly.json: what the Nightly channel installs, this build. Its notes are the commit's.
+          mkdir -p sigs
+          gh release download latest --repo "$REPO" --pattern "*_${VERSION}_*.sig" --dir sigs
+          { echo "Nightly build $VERSION, from commit ${SHA::7}:"; echo; git log -1 --format='%s%n%n%b' "$SHA"; } > nightly-notes.md
+          node .github/update-manifest.cjs sigs latest "$VERSION" nightly-notes.md nightly.json
+          gh release upload latest nightly.json --repo "$REPO" --clobber
 
       - name: Tagged release - notes, latest.json, publish
         if: needs.prepare.outputs.stable == 'true'
@@ -331,22 +368,6 @@ jobs:
           # from this release.
           mkdir -p sigs
           gh release download "$RELEASE" --repo "$REPO" --pattern "*_${VERSION}_*.sig" --dir sigs
-          node -e '
-            const fs = require("fs");
-            const kinds = [[/_x64-setup\.exe\.sig$/, "windows-x86_64"], [/_aarch64\.app\.tar\.gz\.sig$/, "darwin-aarch64"],
-                           [/_x64\.app\.tar\.gz\.sig$/, "darwin-x86_64"], [/_amd64\.AppImage\.sig$/, "linux-x86_64"]];
-            const platforms = {};
-            for (const file of fs.readdirSync("sigs")) {
-              const kind = kinds.find(([re]) => re.test(file));
-              if (!kind) continue;
-              platforms[kind[1]] = {
-                signature: fs.readFileSync("sigs/" + file, "utf8").trim(),
-                url: `https://github.com/${process.env.REPO}/releases/download/${process.env.RELEASE}/${file.slice(0, -4)}`,
-              };
-            }
-            if (Object.keys(platforms).length < kinds.length) console.log("::warning::latest.json covers only " + Object.keys(platforms).join(", "));
-            const notes = fs.readFileSync("RELEASE_NOTES.md", "utf8").trim();
-            fs.writeFileSync("latest.json", JSON.stringify({ version: process.env.VERSION, notes, pub_date: new Date().toISOString(), platforms }, null, 2));
-          '
+          node .github/update-manifest.cjs sigs "$RELEASE" "$VERSION" RELEASE_NOTES.md latest.json
           gh release upload "$RELEASE" latest.json --repo "$REPO" --clobber
           gh release edit "$RELEASE" --repo "$REPO" --title "TIde $RELEASE" --notes-file body.md --draft=false --latest

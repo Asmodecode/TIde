@@ -154,6 +154,7 @@ body {
     margin: 8px auto 4px;
 }
 .activity button {
+    position: relative; /* for the Source Control badge */
     height: 44px;
     display: grid;
     place-items: center;
@@ -459,12 +460,26 @@ body {
 
 /* Editor area */
 .workspace {
+    position: relative; /* for the web version's Install button */
     display: flex;
     flex-direction: column;
     min-width: 0;
     min-height: 0;
     background: var(--paper);
 }
+/* The web version's Install button (main.ts setUpInstall): pinned to the tab strip's top right, over
+   the end of the tabs, which leave it room. */
+.install-app {
+    position: absolute; top: 5px; right: 8px; z-index: 5; height: 25px;
+    display: flex; align-items: center; gap: 6px; padding: 0 12px;
+    font: 600 12px var(--ui); color: var(--navy); background: var(--key);
+    border: 0; border-radius: 999px; cursor: pointer;
+    box-shadow: 0 1px 6px rgba(0, 0, 0, .25);
+}
+.install-app:hover { filter: brightness(1.08); }
+.install-app span { font-size: 13px; line-height: 1; }
+.install-app[hidden] { display: none; }
+.workspace:has(> .install-app:not([hidden])) .tabs { padding-right: 104px; }
 .tabs {
     display: flex;
     height: 35px;
@@ -904,9 +919,6 @@ body {
 }
 
 /* Source Control view */
-.activity button {
-    position: relative;
-}
 .activity .badge {
     position: absolute;
     right: 6px;
@@ -1269,7 +1281,7 @@ body {
 .key.fn {
     font-size: clamp(8px, 2.8cqh, 13px);
     border-radius: 999px;
-    background: #13264b;
+    background: #22396a; /* lighter than the panel, so the graph keys show */
 }
 .key.num {
     background: #2b4170;
@@ -1369,64 +1381,6 @@ body {
 :root[data-theme="light"] .calc-drop,
 :root[data-theme="light"] .stage.drop-open::after {
     background: rgba(255, 255, 255, 0.86);
-}
-.calc-console {
-    flex: 0 0 170px;
-    display: flex;
-    flex-direction: column;
-    min-height: 0;
-    border-top: 1px solid var(--rule);
-    background: var(--panel);
-}
-.calc-console[hidden] {
-    display: none;
-}
-.calc-console-bar {
-    display: flex;
-    align-items: center;
-    gap: 10px;
-    padding: 4px 10px 4px 16px;
-    font: 11px var(--ui);
-    letter-spacing: 0.04em;
-    text-transform: uppercase;
-    color: var(--muted);
-}
-.calc-console-bar .hint {
-    flex: 1;
-    text-transform: none;
-    letter-spacing: 0;
-    font-size: 11px;
-}
-.calc-console-bar button {
-    font: 11px var(--ui);
-    color: var(--muted);
-    background: none;
-    border: 0;
-    border-radius: 2px;
-    padding: 2px 6px;
-    cursor: pointer;
-}
-.calc-console-bar button:hover {
-    color: var(--ink);
-    background: var(--body);
-}
-.calc-console-log {
-    flex: 1;
-    overflow: auto;
-    padding: 4px 16px 8px;
-    font: 12px/1.5 var(--mono);
-    white-space: pre-wrap;
-    word-break: break-word;
-    user-select: text;
-}
-.calc-console-log .info {
-    color: var(--key);
-}
-.calc-console-log .err {
-    color: var(--warn);
-}
-.calc-console-log .emu {
-    color: var(--muted);
 }
 .calc-bar button[aria-pressed="true"] {
     border-color: var(--key);
@@ -1561,7 +1515,8 @@ body {
 .file-view select,
 .settings-page select,
 .settings-page input[type="number"],
-.settings-page input[type="search"] {
+.settings-page input[type="search"],
+.settings-page .settings-text {
     font: inherit;
     font-size: 12.5px;
     color: var(--ink);
@@ -1731,33 +1686,7 @@ body {
     background: var(--panel);
 }
 
-/* Output tab and the tide.json button */
-.output-view {
-    display: flex;
-    flex-direction: column;
-    height: 100%;
-    padding: 18px 28px 20px;
-}
-.output-view .title-row {
-    display: flex;
-    align-items: center;
-    gap: 12px;
-    margin-bottom: 10px;
-}
-.output-view h1 {
-    flex: 1;
-    font: 600 20px var(--ui);
-}
-.output-view button {
-    font: inherit;
-    font-size: 12.5px;
-    color: var(--ink);
-    background: var(--body);
-    border: 1px solid var(--rule);
-    border-radius: 3px;
-    padding: 4px 12px;
-    cursor: pointer;
-}
+/* The panel's Output log (panel.ts) */
 .output-log {
     flex: 1;
     min-height: 0;
@@ -1780,9 +1709,6 @@ body {
 }
 .output-log .err {
     color: var(--warn);
-}
-.project-head #project-file[hidden] {
-    display: none;
 }
 
 /* Right-click menus */
@@ -2643,8 +2569,6 @@ body {
 .calc-keypad:not(.nspire) .arrows { height: calc(200% + 1.2cqh); }
 /* The top row (the graph keys, or F1–F5) as tall as the others: with its labels above, a shorter row left the keys too short. */
 .calc-keypad:not(.nspire) .keyrow:first-child { flex: 1; }
-.key.fn { background: #22396a; }
-:root[data-theme="light"] .key.fn { background: #e6ecf5; }
 
 /* Setting up a folder (main.ts askSetup): the images popup's frame, in three numbered sections in
    the order a project is set up and run: its calculator, its language, then what Run does, as a
@@ -2676,10 +2600,6 @@ body {
 .setup-dialog .images-foot .image-btn[hidden] { display: none; }
 .setup-section { display: flex; flex-direction: column; gap: 10px; }
 .setup-head { display: flex; align-items: flex-start; gap: 10px; }
-.setup-num {
-    flex: none; display: grid; place-items: center; width: 22px; height: 22px; margin-top: 1px; border-radius: 50%;
-    font: 700 11.5px var(--ui); color: var(--navy); background: var(--key);
-}
 .setup-head h3 { font: 600 13.5px var(--ui); }
 .setup-head p { font-size: 12px; color: var(--muted); margin-top: 1px; }
 .setup-choices { display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: 8px; }

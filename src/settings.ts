@@ -14,6 +14,8 @@ export interface Settings {
   /** How to run Luna (packs .lua/.py into .tns); a path if it isn't on PATH. */
   luna: string;
   checkUpdates: boolean;
+  /** Which builds the desktop app updates to: tagged releases, or every build of main. */
+  updateChannel: "stable" | "nightly";
   refreshScmOnFocus: boolean;
   shiftDeletes: boolean;
   /** Saves changed files and programs a moment after you stop typing, and when TIde loses focus. */
@@ -36,6 +38,7 @@ const DEFAULTS: Settings = {
   ndlessHome: "",
   luna: "luna",
   checkUpdates: true,
+  updateChannel: "stable",
   refreshScmOnFocus: true,
   shiftDeletes: true,
   autoSave: false,

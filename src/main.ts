@@ -15,7 +15,7 @@ import { C_CATALOG } from "./c-support";
 import { PY_CATALOG, watchPython } from "./py2ez80-support";
 import { TI_PYTHON_CATALOG } from "./tipython-support";
 import { ASM_CATALOG, ASM_LANG } from "./asm-support";
-import { appVersion, checkForUpdate } from "./updater";
+import { getVersion as appVersion } from "@tauri-apps/api/app";
 import { createScm } from "./scm";
 import { showMenu, type MenuItem } from "./menu";
 import { SEND_TYPES, TREE_DRAG, createCalc, unbundle } from "./calc";
@@ -41,6 +41,15 @@ import {
   type Row,
   type Settings,
 } from "./settings";
+
+/**
+ * Updates are the desktop app's alone. The web version is always the one on its page, so it has no
+ * update button, settings or code: MODE is fixed when Vite builds, and the web build leaves the
+ * updater (updater.ts and the updater plugin) out entirely.
+ */
+const updater = import.meta.env.MODE === "web" ? null : () => import("./updater");
+const checkForUpdate = (say: (text: string) => void, quiet = false) =>
+  updater ? updater().then((u) => u.checkForUpdate(say, quiet)) : Promise.resolve();
 import {
   CONFIG_DIR,
   CONFIG_FILE,
@@ -1421,6 +1430,24 @@ function settingRows(): Row[] {
     },
     {
       section: "Updates",
+      label: "Update channel",
+      description:
+        "Stable updates to each tagged release. Nightly updates to every build of TIde's main branch, with the newest changes before they're released, and less tested. Going back to Stable keeps the nightly until the next release is newer. Desktop app only.",
+      control: {
+        kind: "select",
+        options: [
+          ["stable", "Stable"],
+          ["nightly", "Nightly"],
+        ],
+        get: () => s.updateChannel,
+        set: (v) => {
+          setSetting("updateChannel", v as Settings["updateChannel"]);
+          void checkForUpdate(setMessage);
+        },
+      },
+    },
+    {
+      section: "Updates",
       label: "Check now",
       description: "Look for a newer version of TIde.",
       control: {
@@ -1491,7 +1518,12 @@ function settingRows(): Row[] {
     if (key && key in fromProject)
       row.description += ` This project's tide.json sets it to ${JSON.stringify(fromProject[key])}.`;
   }
-  return rows;
+  // The web version leaves out what only the desktop app does: updates (see updater above), source
+  // control, the TI-Nspire's command-line tools, and the Recycle Bin (a browser deletes for good).
+  const desktopOnly = new Set(["Updates", "Source control", "TI-Nspire"]);
+  return fs.web
+    ? rows.filter((r) => !desktopOnly.has(r.section) && r.label !== "Shift for permanent delete")
+    : rows;
 }
 
 function setGutter(numbers: boolean) {
@@ -3390,6 +3422,7 @@ function nameBoxRow(
 
 /** Deletes a file or folder from the Explorer: to the Recycle Bin, or permanently. Closes its tabs. */
 async function deleteEntry(path: string, isDir: boolean, permanent: boolean) {
+  if (fs.web) permanent = true; // a browser has no Recycle Bin
   const name = baseName(path),
     what = isDir ? `the folder ${name} and everything in it` : name;
   const bin = navigator.userAgent.includes("Mac") ? "Trash" : "Recycle Bin";
@@ -3815,6 +3848,8 @@ function deleteItems(path: string, isDir: boolean): MenuItem[] {
     shortcut: "Shift+Delete",
     run: () => void deleteEntry(path, isDir, true),
   };
+  // A browser has no Recycle Bin: the web version's one Delete deletes for good, and says so.
+  if (fs.web) return [{ ...permanent, label: "Delete…", shortcut: "Delete" }];
   return settings().shiftDeletes
     ? [{ ...trash, shift: permanent }]
     : [trash, permanent];
@@ -4310,11 +4345,15 @@ $("file-menu").addEventListener("click", (e) => {
       shortcut: "Ctrl+Shift+X",
       run: () => showPane("ext"),
     },
-    {
-      label: "Terminal",
-      shortcut: "Ctrl+`",
-      run: () => panel.show("terminal", true),
-    },
+    ...(fs.desktop
+      ? [
+          {
+            label: "Terminal",
+            shortcut: "Ctrl+`",
+            run: () => panel.show("terminal", true),
+          },
+        ]
+      : []),
     {
       label: "Output",
       shortcut: "Ctrl+Shift+U",
@@ -4420,7 +4459,7 @@ window.addEventListener("keydown", (e) => {
   } else if (key === "b") {
     e.preventDefault();
     showPane(pane, true);
-  } else if (e.shiftKey && key === "g") {
+  } else if (e.shiftKey && key === "g" && fs.desktop) {
     e.preventDefault();
     showPane("scm");
   } else if (e.shiftKey && key === "x") {
@@ -4429,7 +4468,7 @@ window.addEventListener("keydown", (e) => {
   } else if (e.shiftKey && key === "u") {
     e.preventDefault();
     panel.toggle("output");
-  } else if (e.key === "`") {
+  } else if (e.key === "`" && fs.desktop) {
     e.preventDefault();
     panel.toggle("terminal");
   } else if (key === ",") {
@@ -4450,22 +4489,69 @@ applyEditorMode();
 showPane("files");
 renderTree();
 
-// Desktop builds check the latest release for an update; the status bar shows the version and checks on click.
+// Desktop builds check their update channel for an update; the status bar shows the version and
+// checks on click. The web version has neither: its version button stays hidden.
 if (fs.web) {
-  // The web version: no updates to check; the status bar links to the desktop app instead.
-  const version = $<HTMLButtonElement>("version");
-  version.hidden = false;
-  version.textContent = "TIde Web";
-  version.title =
-    "Get the desktop app, with the terminal, source control and updates";
-  version.addEventListener("click", () =>
-    window.open(
-      "https://github.com/XSamuraiCoder/TIde/releases/latest",
-      "_blank",
-      "noopener",
-    ),
-  );
-  $("calc-cemu").hidden = true;
+  // What only the desktop app has: the CEmu app, source control and the terminal.
+  for (const id of ["calc-cemu", "act-scm", "panel-tab-terminal", "status-terminal", "panel-new-terminal"])
+    $(id).hidden = true;
+  // The nightly web version, built from every push to main at /TIde/nightly/, says so in its tab.
+  const nightly = import.meta.env.BASE_URL.endsWith("/nightly/");
+  if (nightly) document.title = "TIde Nightly";
+  setUpInstall(nightly);
+}
+
+/**
+ * The web version's Install button, at the top right: TIde as an app from this browser (it's a PWA,
+ * see vite.config.ts), or the desktop app. The browser offers installing when it can
+ * (beforeinstallprompt, in Chrome and Edge); others install from their own menu, and the button
+ * says how. Hidden once TIde runs as an installed app.
+ */
+function setUpInstall(nightly: boolean) {
+  type InstallPrompt = Event & { prompt(): Promise<void>; userChoice: Promise<{ outcome: string }> };
+  let offer: InstallPrompt | null = null;
+  const name = nightly ? "TIde Nightly" : "TIde";
+  const button = h("button", { type: "button", id: "install-app", className: "install-app", title: `Install ${name}` },
+    h("span", { ariaHidden: "true" }, "⤓"), "Install");
+  document.querySelector(".workspace")?.append(button);
+  const installed = () => matchMedia("(display-mode: standalone)").matches || matchMedia("(display-mode: window-controls-overlay)").matches;
+  button.hidden = installed();
+  window.addEventListener("beforeinstallprompt", (e) => {
+    e.preventDefault(); // the button offers it instead of the browser's own bar
+    offer = e as InstallPrompt;
+  });
+  window.addEventListener("appinstalled", () => {
+    button.hidden = true;
+    offer = null;
+    setMessage(`Installed ${name}: it opens from your apps, and offline too.`);
+  });
+  const howTo = () => {
+    const ua = navigator.userAgent;
+    if (/Firefox\//.test(ua)) return "Firefox can't install sites as apps. Open TIde in Chrome or Edge to install it, or get the desktop app.";
+    if (/Safari\//.test(ua) && !/Chrome\/|Chromium\/|Edg\//.test(ua))
+      return /iPhone|iPad/.test(ua) ? "In Safari, tap Share, then Add to Home Screen." : "In Safari, choose File → Add to Dock.";
+    return "Use your browser's menu: Install TIde (or Apps → Install this site as an app).";
+  };
+  button.addEventListener("click", () => {
+    const r = button.getBoundingClientRect();
+    showMenu(r.right, r.bottom + 2, [
+      {
+        label: `Install ${name} in this browser`,
+        run: () => {
+          if (!offer) return setMessage(howTo());
+          const asked = offer;
+          offer = null; // a prompt can be shown only once
+          void asked.prompt().then(() => asked.userChoice).then((choice) => {
+            if (choice.outcome !== "accepted") setMessage("Not installed. The Install button can ask again after the page reloads.");
+          });
+        },
+      },
+      {
+        label: "Download the desktop app",
+        run: () => window.open("https://github.com/XSamuraiCoder/TIde/releases/latest", "_blank", "noopener"),
+      },
+    ]);
+  });
 }
 if (fs.desktop) {
   const version = $<HTMLButtonElement>("version");
@@ -4487,6 +4573,7 @@ const openPath = (path: string) =>
   openFile({ name: baseName(path), path, isDir: false });
 const extensionsView = createExtensionsView({
   available: fs.available,
+  desktop: fs.desktop,
   say: setMessage,
   openFile: openPath,
   reveal: (path) => fs.revealExtension(path),

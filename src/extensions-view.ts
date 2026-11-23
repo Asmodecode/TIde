@@ -15,6 +15,8 @@ function el<K extends keyof HTMLElementTagNameMap>(tag: K, props: Record<string,
 
 export function createExtensionsView(opts: {
   available: boolean;
+  /** The desktop app: uninstalling goes to the Recycle Bin, and the folder can be shown. */
+  desktop: boolean;
   say: (text: string) => void;
   openFile: (path: string) => Promise<void>;
   reveal: (path?: string) => Promise<void>;
@@ -63,7 +65,7 @@ export function createExtensionsView(opts: {
   async function uninstall(ext: Extension) {
     const m = ext.manifest;
     const again = ext.bundled ? " It comes with TIde, so you can install it again from Available." : "";
-    if (!confirm(`Uninstall ${m.name}? Its folder goes to the Recycle Bin.${again}`)) return;
+    if (!confirm(`Uninstall ${m.name}?${opts.desktop ? " Its folder goes to the Recycle Bin." : ""}${again}`)) return;
     try {
       await uninstallExtension(ext);
       opts.say(`Uninstalled ${m.name}.`);
@@ -177,7 +179,7 @@ export function createExtensionsView(opts: {
     showMenu(r.left, r.bottom + 2, [
       { label: "New extension…", disabled: !opts.available, run: () => { naming = true; render(); } },
       { label: "Install from .TIdeex…", disabled: !opts.available, run: () => void opts.pickPackage().then(p => { if (p) void install(p); }) },
-      { label: "Open extensions folder", disabled: !opts.available, run: () => void opts.reveal() },
+      ...(opts.desktop ? [{ label: "Open extensions folder", run: () => void opts.reveal() }] : []),
       { label: "Reload extensions", disabled: !opts.available, run: () => void reloadExtensions().then(() => opts.say(`Reloaded ${extensions().filter(x => !x.builtIn).length} installed extensions.`)) },
     ]);
   });

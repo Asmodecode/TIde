@@ -1,6 +1,11 @@
-// Auto-update: checks the newest stable (tagged) GitHub release (its latest.json, written by the build workflow),
-// shows its Markdown release notes, and installs and restarts on request. Desktop builds only.
-import { check, type Update } from "@tauri-apps/plugin-updater";
+// Auto-update: checks the update channel set in Settings, Stable (the newest tagged release's
+// latest.json) or Nightly (nightly.json, from every build of main; both written by the build
+// workflow), shows the Markdown notes, and installs and restarts on request. Desktop builds only.
+// The check is TIde's own (update_check, in update.rs), for the channel's address; the update it
+// finds is the plugin's, so downloading and installing are the plugin's.
+import { Update } from "@tauri-apps/plugin-updater";
+import { invoke } from "@tauri-apps/api/core";
+import { settings } from "./settings";
 import { relaunch } from "@tauri-apps/plugin-process";
 import { getVersion } from "@tauri-apps/api/app";
 import { openUrl } from "@tauri-apps/plugin-opener";
@@ -91,6 +96,8 @@ const ui = {
 };
 
 let found: Update | null = null;
+/** " (nightly)" for a nightly build's version (2.0.1-75: a number after the dash), else nothing. */
+const nightly = (version: string) => (/-\d+$/.test(version) ? " (nightly)" : "");
 let say: (text: string) => void = () => {};
 
 async function installUpdate() {
@@ -118,7 +125,7 @@ async function installUpdate() {
 
 function showNotes() {
   if (!found) return;
-  ui.title.textContent = `TIde ${found.version}`;
+  ui.title.textContent = `TIde ${found.version}${nightly(found.version)}`;
   ui.current.textContent = `You have ${found.currentVersion}.`;
   ui.notes.replaceChildren(...renderMarkdown(found.body?.trim() || "No release notes.").childNodes);
   if (!ui.dialog.open) ui.dialog.showModal();
@@ -141,17 +148,18 @@ export async function checkForUpdate(report: (text: string) => void, quiet = fal
   say = report;
   if (!quiet) say("Checking for updates…");
   try {
-    const update = await check();
-    if (!update) { if (!quiet) say(`TIde ${await getVersion()} is up to date.`); return; }
+    const channel = settings().updateChannel;
+    const meta = await invoke<ConstructorParameters<typeof Update>[0] | null>("update_check", { channel });
+    const update = meta ? new Update(meta) : null;
+    if (!update) { if (!quiet) say(`TIde ${await getVersion()} is up to date${channel === "nightly" ? " on the Nightly channel" : ""}.`); return; }
     let skipped: string | null = null;
     try { skipped = localStorage.getItem(SKIP_PREF); } catch { /* storage unavailable */ }
     if (quiet && skipped === update.version) return;
     found = update;
-    ui.version.textContent = `TIde ${update.version}`;
+    ui.version.textContent = `TIde ${update.version}${nightly(update.version)}`;
     ui.toast.hidden = false;
   } catch (err) {
     if (!quiet) say(`Could not check for updates: ${err}`);
   }
 }
 
-export const appVersion = () => getVersion();
