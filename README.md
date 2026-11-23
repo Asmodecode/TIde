@@ -37,7 +37,7 @@ The web version needs nothing installed: open [xsamuraicoder.github.io/TIde](htt
 
 ### Updates and nightlies
 
-The installed app updates itself: it checks for a new release when it starts and offers it, with its release notes. The portable exe and the `.app.zip` don't update themselves; download the new one. **Settings → Updates → Update channel** switches to **Nightly**, every build of the `main` branch, with the newest changes before they're released; the nightly installers are on the [latest build](https://github.com/XSamuraiCoder/TIde/releases/tag/latest) prerelease, and the nightly web version is at [xsamuraicoder.github.io/TIde/nightly](https://xsamuraicoder.github.io/TIde/nightly/).
+The installed app updates itself: it checks for a new release when it starts and offers it, with its release notes. The portable exe and the `.app.zip` don't update themselves; download the new one. **Settings → Updates → Update channel** switches to **Nightly**, every build of the `main` branch, with the newest changes before they're released; the nightly installers are on the [latest build](https://github.com/XSamuraiCoder/TIde/releases/tag/latest) prerelease (on Linux, the `.deb` and the AppImage: an `.rpm` can't carry a nightly's version), and the nightly web version is at [xsamuraicoder.github.io/TIde/nightly](https://xsamuraicoder.github.io/TIde/nightly/).
 
 ## Web version
 

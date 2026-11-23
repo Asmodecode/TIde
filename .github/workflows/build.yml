@@ -172,7 +172,9 @@ jobs:
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         with:
-          args: ${{ matrix.args }} --config src-tauri/tauri.ci.conf.json
+          # A nightly's version has a dash (2.0.2-48), which an .rpm can't have: Linux nightlies are the
+          # .deb and the AppImage (what the Nightly channel updates from). Releases build all three.
+          args: ${{ matrix.args }} --config src-tauri/tauri.ci.conf.json ${{ needs.prepare.outputs.stable != 'true' && runner.os == 'Linux' && '--bundles deb,appimage' || '' }}
 
       - name: Upload installers to the release
         shell: bash   # the default on Windows is PowerShell
