@@ -2,14 +2,46 @@
 
 A desktop and web IDE for TI calculators, built with Tauri and the Monaco editor. Write TI-BASIC and build real `.8xp` files; work on CE C and C++, eZ80 and z80 assembly, TI-Python and py2ez80 projects; or build TI-Nspire CX programs with Ndless and Lua scripts with Luna. Every calculator runs in TIde, emulated or the real one over a cable.
 
-Installers for Windows, Linux and macOS are published on the `latest` release by the build workflow, along with two versions that don't need installing:
+## Installation
 
-- **Windows:** `TIde_<version>_x64-portable.exe` runs on its own. It needs WebView2, which Windows 11 already includes, and it still saves programs in your user folder rather than next to the exe.
-- **macOS:** `TIde_<version>_aarch64.app.zip` (Apple Silicon) or `TIde_<version>_x64.app.zip` (Intel) contains `TIde.app`. The app isn't signed, so if macOS says it is damaged, run `xattr -cr TIde.app` once.
+Download TIde from the [latest release](https://github.com/XSamuraiCoder/TIde/releases/latest), or use it in your browser at [xsamuraicoder.github.io/TIde](https://xsamuraicoder.github.io/TIde/). In the file names below, `<version>` is the release's version, such as `2.0.1`.
+
+### macOS
+
+1. Download `TIde_<version>_aarch64.dmg` for a Mac with Apple Silicon (M1 and later), or `TIde_<version>_x64.dmg` for an Intel Mac. (Not sure? Apple menu → About This Mac: "Chip: Apple M…" is Apple Silicon.)
+2. Open the `.dmg` and drag **TIde** into **Applications**.
+3. **Run this once in Terminal before opening TIde:**
+
+   ```sh
+   xattr -cr /Applications/TIde.app
+   ```
+
+   TIde isn't signed with an Apple developer certificate, so macOS marks the downloaded app as quarantined and, when you open it, says **"TIde is damaged and can't be opened"** or that Apple can't check it for malicious software. It isn't damaged: `xattr -cr` removes the quarantine mark macOS put on it, and TIde then opens normally. You only need to do it once; TIde's own updates aren't quarantined.
+
+The `.app.zip` files (`TIde_<version>_aarch64.app.zip`, `TIde_<version>_x64.app.zip`) hold the same `TIde.app` without an installer: unzip it, move it where you like, and run `xattr -cr` on it there (for example `xattr -cr ~/Downloads/TIde.app`).
+
+### Windows
+
+- **Installer:** `TIde_<version>_x64-setup.exe` (or `TIde_<version>_x64_en-US.msi`). TIde isn't signed with a code-signing certificate, so Windows may show **"Windows protected your PC"**: click **More info**, then **Run anyway**.
+- **Portable:** `TIde_<version>_x64-portable.exe` runs on its own, with nothing to install. It needs WebView2, which Windows 11 already includes, and it still keeps your programs in your user folder rather than next to the exe.
+
+### Linux
+
+- **Debian, Ubuntu and similar:** `sudo apt install ./TIde_<version>_amd64.deb`
+- **Fedora, openSUSE and similar:** `sudo dnf install ./TIde-<version>-1.x86_64.rpm`
+- **Any distribution:** `TIde_<version>_amd64.AppImage`: make it executable with `chmod +x TIde_<version>_amd64.AppImage`, then run it.
+
+### In the browser
+
+The web version needs nothing installed: open [xsamuraicoder.github.io/TIde](https://xsamuraicoder.github.io/TIde/). To keep it as an app of its own, which opens from your apps and works offline, press **Install** at the top right, or use your browser's menu: Chrome and Edge install it, Safari adds it to the Dock (or, on iPhone and iPad, Share → Add to Home Screen). Firefox can't install sites as apps. The web version leaves out what only the desktop app does: the terminal, source control, the CEmu app and updates.
+
+### Updates and nightlies
+
+The installed app updates itself: it checks for a new release when it starts and offers it, with its release notes. The portable exe and the `.app.zip` don't update themselves; download the new one. **Settings → Updates → Update channel** switches to **Nightly**, every build of the `main` branch, with the newest changes before they're released; the nightly installers are on the [latest build](https://github.com/XSamuraiCoder/TIde/releases/tag/latest) prerelease, and the nightly web version is at [xsamuraicoder.github.io/TIde/nightly](https://xsamuraicoder.github.io/TIde/nightly/).
 
 ## Web version
 
-TIde also runs in the browser, at [xsamuraicoder.github.io/TIde](https://xsamuraicoder.github.io/TIde/), published with every stable release; the nightly, from every push to `main`, is at [xsamuraicoder.github.io/TIde/nightly](https://xsamuraicoder.github.io/TIde/nightly/). Each one installs as an app: **Install** at the top right (or your browser's own menu: Chrome and Edge install it, Safari adds it to the Dock), and an installed TIde opens offline, from the copy it keeps of the site. The web version is always the one on its page, so it has no updates to check; it also leaves out what only the desktop app does. It has the editor, IntelliSense, docs, extensions and all three calculator emulators, and builds in the browser: TI-BASIC to `.8xp`, and TI-83 Plus / 84 Plus z80 and TI-84 Plus CE eZ80 assembly with spasm-ng compiled to WebAssembly. **File → Open folder…** opens a real folder on your computer in Chrome and Edge; **File → Open browser project…** keeps a project in the browser's own storage, on any browser. Calculator ROMs stay in the browser's storage too. The terminal, source control, the CEmu app and updates are in the desktop app. To build it yourself: `npm run build:web` (into `dist-web`).
+The web version ([installing it](#in-the-browser)) is published with every stable release, and its nightly with every push to `main`. It is always the one on its page, so it has no updates to check. It has the editor, IntelliSense, docs, extensions and all three calculator emulators, and builds in the browser: TI-BASIC to `.8xp`, and TI-83 Plus / 84 Plus z80 and TI-84 Plus CE eZ80 assembly with spasm-ng compiled to WebAssembly. **File → Open folder…** opens a real folder on your computer in Chrome and Edge; **File → Open browser project…** keeps a project in the browser's own storage, on any browser. Calculator ROMs stay in the browser's storage too. The terminal, source control, the CEmu app and updates are in the desktop app. To build it yourself: `npm run build:web` (into `dist-web`).
 
 ## TI-BASIC
 
