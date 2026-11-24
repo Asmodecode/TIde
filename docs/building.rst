@@ -112,6 +112,6 @@ builds need the ``TAURI_SIGNING_PRIVATE_KEY`` and
 ``TAURI_SIGNING_PRIVATE_KEY_PASSWORD`` repository secrets.
 
 The ``web`` job publishes the stable site and nightly site to GitHub Pages. The Docs workflow
-publishes ``docs/`` from the ``docs`` branch at
+publishes ``docs/`` from ``main`` at
 `xsamuraicoder.github.io/TIde/docs <https://xsamuraicoder.github.io/TIde/docs/>`_. The hosted
 documentation can also be built by Read the Docs using ``.readthedocs.yaml``.

@@ -3,14 +3,14 @@ name: Web toolchain
 # Builds ez80-clang for WebAssembly (toolchain/clang/build.sh) and publishes it to the
 # "web-toolchain" release, where the web version's build downloads it: at tens of megabytes it's
 # too big to keep in the repository like the other tools in toolchain/. It runs when the Clang build
-# changes on the web branch, or by hand.
+# changes on main, or by hand.
 #
 # It takes hours, close to GitHub's six-hour limit for a job, so the build folder is cached even when
 # the build stops partway: running the workflow again carries on from where it got to.
 on:
   workflow_dispatch:
   push:
-    branches: [web]
+    branches: [main]
     paths:
       - toolchain/clang/build.sh
       - .github/workflows/toolchain.yml
