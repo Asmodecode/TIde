@@ -40,7 +40,10 @@ They're in ``docs/``, built with `Sphinx <https://www.sphinx-doc.org/>`_ and the
    pip install -r requirements.txt
    make html               # then open _build/html/index.html
 
-Read the Docs builds them from ``.readthedocs.yaml`` at the repository's root.
+Every push to the ``docs`` branch publishes them at
+`xsamuraicoder.github.io/TIde/docs <https://xsamuraicoder.github.io/TIde/docs/>`_ (the Docs
+workflow, ``.github/workflows/docs.yml``). Read the Docs can build them too, from ``.readthedocs.yaml``
+at the repository's root.
 
 Releases
 --------
