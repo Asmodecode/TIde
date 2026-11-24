@@ -231,9 +231,10 @@ jobs:
     name: Web version (GitHub Pages)
     # TIde's web version, on GitHub Pages (Settings > Pages > Source: GitHub Actions), in two places:
     # - stable, at https://<owner>.github.io/TIde/, from each stable release (and web version tag);
-    # - nightly, at https://<owner>.github.io/TIde/nightly/, from every push to main.
+    # - nightly, at https://<owner>.github.io/TIde/nightly/, from every push to main;
+    # and the docs at https://<owner>.github.io/TIde/docs/, from the docs branch (docs.yml).
     # The gh-pages branch holds the whole site, both builds, JavaScript and WebAssembly included,
-    # as one commit: each deploy replaces only its own part (the nightly/ folder, or everything else)
+    # as one commit: each deploy replaces only its own part (nightly/, docs/, or everything else)
     # and force-pushes, so old builds' large files don't pile up. Pages then publishes the branch's tree.
     needs: prepare
     runs-on: ubuntu-latest
@@ -277,8 +278,8 @@ jobs:
           git clone -q --depth 1 --branch gh-pages "$REMOTE" site 2>/dev/null || mkdir site
           rm -rf site/.git
           if [ "$CHANNEL" = stable ]; then
-            # Everything but nightly/ is the stable build's.
-            find site -mindepth 1 -maxdepth 1 ! -name nightly -exec rm -rf {} +
+            # Everything but nightly/ and docs/ (the docs workflow's) is the stable build's.
+            find site -mindepth 1 -maxdepth 1 ! -name nightly ! -name docs -exec rm -rf {} +
             cp -a dist-web/. site/
           else
             rm -rf site/nightly

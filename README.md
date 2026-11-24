@@ -2,6 +2,8 @@
 
 A desktop and web IDE for TI calculators, built with Tauri and the Monaco editor. Write TI-BASIC and build real `.8xp` files; work on CE C and C++, eZ80 and z80 assembly, TI-Python and py2ez80 projects; or build TI-Nspire CX programs with Ndless and Lua scripts with Luna. Every calculator runs in TIde, emulated or the real one over a cable.
 
+**Documentation:** [xsamuraicoder.github.io/TIde/docs](https://xsamuraicoder.github.io/TIde/docs/)
+
 ## Installation
 
 Download TIde from the [latest release](https://github.com/XSamuraiCoder/TIde/releases/latest), or use it in your browser at [xsamuraicoder.github.io/TIde](https://xsamuraicoder.github.io/TIde/). In the file names below, `<version>` is the release's version, such as `2.0.1`.
