@@ -229,10 +229,10 @@ jobs:
 
   web:
     name: Web version (GitHub Pages)
-    # TIde's web version, on GitHub Pages (Settings > Pages > Source: GitHub Actions), in two places:
+    # TIde's web version, on GitHub Pages (Settings > Pages > Deploy from branch: gh-pages), in two places:
     # - stable, at https://<owner>.github.io/TIde/, from each stable release (and web version tag);
     # - nightly, at https://<owner>.github.io/TIde/nightly/, from every push to main;
-    # and the docs at https://<owner>.github.io/TIde/docs/, from the docs branch (docs.yml).
+    # and the docs at https://<owner>.github.io/TIde/docs/, from main (docs.yml).
     # The gh-pages branch holds the whole site, both builds, JavaScript and WebAssembly included,
     # as one commit: each deploy replaces only its own part (nightly/, docs/, or everything else)
     # and force-pushes, so old builds' large files don't pile up. Pages then publishes the branch's tree.
@@ -243,13 +243,7 @@ jobs:
       group: pages
       cancel-in-progress: false
     permissions:
-      actions: read
       contents: write
-      pages: write
-      id-token: write
-    environment:
-      name: github-pages
-      url: ${{ steps.deploy.outputs.page_url }}
     env:
       CHANNEL: ${{ (needs.prepare.outputs.stable == 'true' || needs.prepare.outputs.web == 'true') && 'stable' || 'nightly' }}
     steps:
@@ -302,12 +296,6 @@ jobs:
           git commit -q -m "TIde $VERSION web version ($CHANNEL), built from ${GITHUB_SHA::7}"
           git push -q --force "$REMOTE" gh-pages
           rm -rf .git
-      - uses: actions/upload-pages-artifact@v5
-        with:
-          path: site
-      - id: deploy
-        uses: actions/deploy-pages@v5.0.1
-
   finish:
     name: Finish release
     # Runs only if every platform built, so a failed build keeps that platform's old installers.

@@ -13,10 +13,7 @@ on:
   workflow_dispatch:
 
 permissions:
-  actions: read
   contents: write
-  pages: write
-  id-token: write
 
 jobs:
   docs:
@@ -26,9 +23,6 @@ jobs:
     concurrency:
       group: pages
       cancel-in-progress: false
-    environment:
-      name: github-pages
-      url: ${{ steps.deploy.outputs.page_url }}docs/
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -60,8 +54,3 @@ jobs:
           git commit -q -m "TIde docs, built from ${GITHUB_SHA::7}"
           git push -q --force "$REMOTE" gh-pages
           rm -rf .git
-      - uses: actions/upload-pages-artifact@v5
-        with:
-          path: site
-      - id: deploy
-        uses: actions/deploy-pages@v5.0.1
