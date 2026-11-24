@@ -38,7 +38,7 @@ real one over a cable.
 
 .. toctree::
    :maxdepth: 2
-   :caption: Development
+   :caption: Developing TIde
 
    building
    contributing
