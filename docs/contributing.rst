@@ -5,10 +5,10 @@ Thanks for helping with TIde.
 
 - **Bugs and ideas:** open an `issue <https://github.com/XSamuraiCoder/TIde/issues>`_. For a cable
   or calculator that doesn't connect, say which ones.
-- **Changes:** fork the repository, make a branch, and open a pull request into ``main``. Changes to
-  ``main`` go through a pull request, with one approving review.
+- **Changes:** work on ``main`` and push commits directly to it. Pushes build a nightly desktop
+  release and publish the nightly web app; documentation changes also publish the docs site.
 
-Before opening a pull request:
+Before pushing a change:
 
 1. ``npx tsc --noEmit`` passes.
 2. ``cargo test --lib`` passes in ``src-tauri``.

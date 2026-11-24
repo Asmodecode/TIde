@@ -94,10 +94,10 @@ warnings as errors, matching the hosted documentation builds.
 Contribute a change
 -------------------
 
-For bugs and feature ideas, open an `issue <https://github.com/XSamuraiCoder/TIde/issues>`_. For
-code changes, fork the repository, make a branch, and open a pull request targeting ``main``. Explain
-what changed and how you checked it; update the README or docs when behavior or setup instructions
-change.
+For bugs and feature ideas, open an `issue <https://github.com/XSamuraiCoder/TIde/issues>`_. Make
+code changes on ``main`` and push them directly. Each push builds a nightly desktop release and
+publishes the nightly web app; documentation changes also publish the docs site. Explain what
+changed in the commit and update the README or docs when behavior or setup instructions change.
 
 TIde is free software under the GNU General Public License v3.0 or later. Contributions are made
 under that license.
