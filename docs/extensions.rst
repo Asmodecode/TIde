@@ -13,6 +13,20 @@ In the desktop app, open the Extensions view with :kbd:`Ctrl+Shift+X` and choose
 starter. You can also create those files in the extensions folder, opened with **More → Open
 extensions folder**. Saving an extension file reloads extensions.
 
+An extension is a folder. Keep every file it needs inside that folder so exporting it includes the
+whole project:
+
+.. code-block:: text
+
+   my-extension/
+   ├── extension.json
+   ├── main.js          # optional
+   └── data/
+       └── commands.json
+
+``main.js`` is optional for manifest-only extensions. Use ``tide.files.read("data/commands.json")``
+to read a bundled text file relative to the extension folder.
+
 The extension folder is the project root. A minimal extension needs a manifest:
 
 .. code-block:: json
@@ -50,9 +64,10 @@ The extension folder is the project root. A minimal extension needs a manifest:
      }
    }
 
-The ``id`` uses lowercase letters, digits, periods, and hyphens. Keep it stable: TIde uses it to
-identify the extension and replace it when a user installs an update. The manifest is checked as you
-edit it; hover fields in the editor for schema help.
+The ``id`` is 1–64 characters, starts with a lowercase letter or digit, and uses lowercase letters,
+digits, periods, and hyphens. Keep it stable: TIde uses it to identify the extension and replace it
+when a user installs an update. The manifest is checked as you edit it; hover fields in the editor
+for schema help.
 
 Contribute editor features
 --------------------------
@@ -75,7 +90,12 @@ The ``contributes`` object supports four kinds of static contributions:
 The ``language`` value is a Monaco language ID. TIde includes IDs such as ``tibasic``, ``c``,
 ``cpp``, ``ez80``, ``z80``, ``python``, ``tipython``, ``py2ez80``, ``lua``, and ``json``. When you
 contribute a new language, use its ID for that extension's snippets, completions, hovers, and
-JavaScript providers. Do not register an ID that is already in use.
+JavaScript providers. Choose a unique ID for a new language; when adding features to an existing
+language, contribute under its ID without adding a new ``languages`` entry.
+
+Prefer a manifest contribution when its fixed data is enough. Use JavaScript when suggestions or
+diagnostics depend on the current text, project files, or settings. A manifest-only extension is
+simpler to review and does not run JavaScript.
 
 Here is a minimal language contribution for ``.foo`` files:
 
@@ -106,6 +126,75 @@ Here is a minimal language contribution for ``.foo`` files:
    }
 
 For working examples, inspect the built-in extension folders in the `TIde source <https://github.com/XSamuraiCoder/TIde/tree/main/extensions>`_.
+
+Add dynamic completions
+-----------------------
+
+Register a Monaco provider from ``activate`` when completion items depend on the current document.
+The provider receives the model and cursor position and returns a ``suggestions`` array:
+
+.. code-block:: javascript
+
+   tide.languages.completions("tibasic", {
+     triggerCharacters: ["@"],
+     provideCompletionItems(model, position) {
+       const word = model.getWordUntilPosition(position);
+       const range = {
+         startLineNumber: position.lineNumber,
+         endLineNumber: position.lineNumber,
+         startColumn: word.startColumn,
+         endColumn: word.endColumn
+       };
+       return {
+         suggestions: [{
+           label: "projectName",
+           detail: "Current project name",
+           insertText: "${1:MyProject}",
+           kind: tide.monaco.languages.CompletionItemKind.Variable,
+           insertTextRules:
+             tide.monaco.languages.CompletionItemInsertTextRule.InsertAsSnippet,
+           range
+         }]
+       };
+     }
+   });
+
+Providers follow Monaco's completion, hover, and signature-help interfaces. Register custom
+providers with ``tide.languages.completions``, ``hover``, or ``signatureHelp``; TIde disposes them
+when the extension is turned off or reloaded. Use ``triggerCharacters`` to request suggestions
+after a character such as ``@`` or ``.``.
+
+Add hover help and diagnostics
+------------------------------
+
+A hover provider returns Markdown for a word. A checker can use Monaco markers to underline a
+problem and report it in the editor:
+
+.. code-block:: javascript
+
+   tide.languages.hover("foo", {
+     provideHover(model, position) {
+       const word = model.getWordAtPosition(position);
+       if (word?.word !== "TODO") return null;
+       return { contents: [{ value: "**TODO**: finish this section." }] };
+     }
+   });
+
+   function checkLine(model, lineNumber) {
+     const text = model.getLineContent(lineNumber);
+     const column = text.indexOf("BAD");
+     tide.languages.markers(model, column < 0 ? [] : [{
+       startLineNumber: lineNumber,
+       startColumn: column + 1,
+       endLineNumber: lineNumber,
+       endColumn: column + 4,
+       message: "Replace BAD with a valid value.",
+       severity: tide.monaco.MarkerSeverity.Error
+     }]);
+   }
+
+Monaco marker columns start at 1. Clear an extension's markers with an empty array when the file
+has no problems. TIde clears them when the extension stops.
 
 Add JavaScript behavior
 -----------------------
@@ -140,7 +229,15 @@ Extension API
 * ``tide.commands.register(id, label, run, options?)`` adds a command to the File menu and editor
   context menu. ``options`` can include a ``shortcut``.
 * ``tide.on(event, callback)`` listens for ``open``, ``save``, ``run``, ``project``, or ``settings``
-  events. The callback receives event details when available.
+  events. Event details are:
+
+  * ``open`` and ``save``: ``{name, path, language}``; ``path`` is ``null`` for unsaved or
+    browser-stored files.
+  * ``run``: ``{programs, launch}`` after a program runs in TIde's emulator.
+  * ``project``: ``{root, name}`` when a project folder opens.
+  * ``settings``: the settings object after settings change.
+
+  Keep handlers quick; perform slow work asynchronously so the editor remains responsive.
 * ``tide.editor.file()`` returns the current file's ``name``, ``path``, and ``language`` or ``null``.
   ``text()``, ``setText(text)``, ``selection()``, and ``insert(text)`` read or edit its contents.
 * ``tide.languages.completions(language, provider)``, ``hover(language, provider)``, and
@@ -160,15 +257,70 @@ Extension API
 * ``tide.calculator.show()`` opens the calculator. ``family()`` returns its family or ``null``;
   ``macro(name, argument?)`` runs a calculator macro; and ``send(files)`` sends named byte arrays.
 
+Here is a command that opens a project file and handles the case where no project is open:
+
+.. code-block:: javascript
+
+   tide.commands.register("open-notes", "Open project notes", async () => {
+     if (!tide.project()) {
+       tide.message("Open a project first.");
+       return;
+     }
+     await tide.files.open("notes.md");
+   });
+
+An extension can turn on TIde's existing IntelliSense for a supported language instead of
+registering a second provider for the same feature:
+
+.. code-block:: javascript
+
+   tide.languages.builtIn("c");
+
+You can also add commands for project artifacts. This example sends a built program to the
+calculator:
+
+.. code-block:: javascript
+
+   tide.commands.register("send-program", "Send built program", async () => {
+     if (!tide.project()) {
+       tide.message("Open a project first.");
+       return;
+     }
+     const bytes = await tide.files.readBinary("dist/HELLO.8xp");
+     await tide.calculator.send([{ name: "HELLO.8xp", bytes }]);
+     tide.message("Program sent.");
+   });
+
 Registrations are removed when an extension is disabled or reloaded. Extensions with ``main.js`` run
 inside TIde and can access the APIs above. Only install code from sources you trust.
 
-Develop and package
--------------------
+Test and package
+----------------
 
 Try the extension in the desktop app. Use the Extensions view to enable or disable it, inspect its
 contributions and errors, reload it, or uninstall it. Saving extension files reloads them, so iterate
-by editing the manifest or JavaScript and trying the change again.
+by editing the manifest or JavaScript and trying the change again. Use this check before exporting:
+
+* Does the extension activate with no error in the Extensions view?
+* Do snippets, completions, and hovers appear for the intended language ID?
+* Do commands work with and without an open project or file, as applicable?
+* Does disabling or reloading the extension remove its providers and commands?
+* Does the exported package include every file the extension reads?
+
+Troubleshoot common issues
+--------------------------
+
+* **The extension is missing:** check that it is enabled in the desktop Extensions view and that
+  the folder contains a valid ``extension.json``.
+* **A contribution does not appear:** compare its ``language`` value with the editor's language ID.
+  Use :kbd:`Ctrl+Space` to open suggestions and verify the prefix or completion label.
+* **JavaScript does not start:** confirm the manifest's ``main`` path is relative to the extension
+  folder and that the module exports ``activate(tide)``. Read the error shown in the Extensions
+  view.
+* **The API has no type help:** add ``// @ts-check`` and ``/** @param {Tide} tide */`` above the
+  activation function.
+* **The package will not install:** put ``extension.json`` at the zip root (or in one top-level
+  folder), keep the package below 32 MB unpacked, and use the same stable ``id`` for updates.
 
 When it is ready, select **Export as .TIdeex…** for the installed extension. A ``.TIdeex`` is a zip
 containing ``extension.json`` at its root and the files the extension uses, such as ``main.js``.
