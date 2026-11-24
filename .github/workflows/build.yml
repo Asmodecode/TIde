@@ -302,11 +302,11 @@ jobs:
           git commit -q -m "TIde $VERSION web version ($CHANNEL), built from ${GITHUB_SHA::7}"
           git push -q --force "$REMOTE" gh-pages
           rm -rf .git
-      - uses: actions/upload-pages-artifact@v3
+      - uses: actions/upload-pages-artifact@v5
         with:
           path: site
       - id: deploy
-        uses: actions/deploy-pages@v4
+        uses: actions/deploy-pages@v5.0.1
 
   finish:
     name: Finish release

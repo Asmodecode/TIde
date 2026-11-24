@@ -1,12 +1,12 @@
 name: Docs
 
-# TIde's docs (docs/, Sphinx with the Read the Docs theme), built from the docs branch and published
+# TIde's docs (docs/, Sphinx with the Read the Docs theme), built from main and published
 # on GitHub Pages at https://<owner>.github.io/TIde/docs/, beside the stable and nightly web
 # versions. Like the web job in build.yml, it replaces only its own part of the site (docs/) in the
 # gh-pages branch and publishes the whole branch, so the web versions stay as they are.
 on:
   push:
-    branches: [docs]
+    branches: [main]
     paths:
       - "docs/**"
       - ".github/workflows/docs.yml"
@@ -60,8 +60,8 @@ jobs:
           git commit -q -m "TIde docs, built from ${GITHUB_SHA::7}"
           git push -q --force "$REMOTE" gh-pages
           rm -rf .git
-      - uses: actions/upload-pages-artifact@v3
+      - uses: actions/upload-pages-artifact@v5
         with:
           path: site
       - id: deploy
-        uses: actions/deploy-pages@v4
+        uses: actions/deploy-pages@v5.0.1
