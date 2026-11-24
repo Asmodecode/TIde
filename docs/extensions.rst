@@ -1,8 +1,8 @@
-Extensions
-==========
+Making TIde extensions
+======================
 
-Extensions are add-ons that run inside TIde. To change TIde's own code, build the app, or
-contribute a feature, see :doc:`building`.
+Use this guide to create an extension for TIde, try it in the editor, and package it for sharing.
+For changes to TIde's own code, see :doc:`building`.
 
 The **Extensions** view (:kbd:`Ctrl+Shift+X`) lists installed extensions. Use its switch to turn
 an extension on or off, **Uninstall** to remove one, or the **More** menu to create, reload, and

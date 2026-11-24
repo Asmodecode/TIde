@@ -1,19 +1,37 @@
-TIde
-====
+Making TIde extensions
+======================
 
-**TIde** is a desktop and web IDE for TI calculators. Write TI-BASIC and build real ``.8xp`` files;
-work on CE C and C++, eZ80 and z80 assembly, TI-Python and py2ez80 projects; or build TI-Nspire CX
-programs with Ndless and Lua scripts with Luna. Every calculator runs inside TIde, emulated or the
-real one over a cable.
+Create add-ons for TIde: add language support, snippets, completions, hover help, commands, and
+calculator or project tools. Start with :doc:`extensions` for a step-by-step guide to creating,
+testing, and sharing an extension.
 
-- **Download:** the `latest release <https://github.com/XSamuraiCoder/TIde/releases/latest>`_, for
-  Windows, macOS and Linux. See :doc:`installation`.
-- **In your browser:** `xsamuraicoder.github.io/TIde <https://xsamuraicoder.github.io/TIde/>`_.
-- **Source:** `github.com/XSamuraiCoder/TIde <https://github.com/XSamuraiCoder/TIde>`_.
+Extensions run inside TIde. Manifest contributions can add editor features without JavaScript;
+``main.js`` can use TIde's extension API for commands, events, editor access, files, and calculators.
+User-installed extensions are available in the desktop app.
+
+About TIde
+----------
+
+TIde is a desktop and web IDE for TI calculators. It supports TI-BASIC, CE C and C++, eZ80 and z80
+assembly, TI-Python, py2ez80, TI-Nspire Ndless C/C++, and Lua. It can emulate calculators or connect
+to a real one over a cable.
+
+- **Download TIde:** the `latest release <https://github.com/XSamuraiCoder/TIde/releases/latest>`_,
+  for Windows, macOS and Linux. See :doc:`installation`.
+- **Open TIde in a browser:** `xsamuraicoder.github.io/TIde
+  <https://xsamuraicoder.github.io/TIde/>`_.
+- **Source code:** `github.com/XSamuraiCoder/TIde
+  <https://github.com/XSamuraiCoder/TIde>`_.
 
 .. toctree::
    :maxdepth: 2
-   :caption: Using TIde
+   :caption: Make extensions
+
+   extensions
+
+.. toctree::
+   :maxdepth: 2
+   :caption: Use TIde
 
    installation
    getting-started
@@ -32,13 +50,7 @@ real one over a cable.
 
 .. toctree::
    :maxdepth: 2
-   :caption: Extending TIde
-
-   extensions
-
-.. toctree::
-   :maxdepth: 2
-   :caption: Developing TIde
+   :caption: Develop TIde itself
 
    building
    contributing
