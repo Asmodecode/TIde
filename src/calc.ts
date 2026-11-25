@@ -1262,6 +1262,12 @@ export function createCalc(opts: {
       return b;
     };
     const intro = (text: string) => el("p", { className: "images-intro" }, text);
+    const romHelp = () => el("details", { className: "rom-help" },
+      el("summary", {}, "What the heck is a ROM?"),
+      el("p", {}, "A ROM (Read-Only Memory) is a digital image of the software stored inside your calculator. It contains the operating system and other low-level code that tells the calculator how to work. In order to get TIde to emulate your calculator, you'll need to provide the appropriate ROM image. The process differs for each calculator model. TIde does not provide ROMs due to copyright restrictions, so you must obtain these from your own calculator. ")
+  );
+
+
     const footer = (...kids: HTMLElement[]) => el("div", { className: "images-section-actions" }, ...kids);
 
     const tabs: [ImagesTab, string, boolean][] = [
@@ -1278,7 +1284,8 @@ export function createCalc(opts: {
 
     const sections: Record<ImagesTab, () => HTMLElement[]> = {
       ce: () => [
-        intro("The TI-84 Plus CE, TI-83 Premium CE and TI-82 Advanced Edition Python run in CEmu, each from a ROM dumped from your own calculator. Keep as many as you like: TIde reads each one's model and boot code."),
+        intro("The TI-84 Plus CE, TI-83 Premium CE and TI-82 Advanced Edition Python run in CEmu, each from a ROM dumped from your own calculator. Keep as many ROMs as you like: TIde automatically detects each calculator's model and boot code."),
+        romHelp(),
         ...(have.ces.length
           ? have.ces.map(name => {
               const info = romInfo[`ce/${name}`];
