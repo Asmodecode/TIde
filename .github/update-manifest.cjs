@@ -10,6 +10,8 @@ const kinds = [
   [/_aarch64\.app\.tar\.gz\.sig$/, "darwin-aarch64"],
   [/_x64\.app\.tar\.gz\.sig$/, "darwin-x86_64"],
   [/_amd64\.AppImage\.sig$/, "linux-x86_64"],
+  // Linux's fallback when the updater can't install the AppImage, .deb or .rpm (update.rs).
+  [/_amd64\.tar\.gz\.sig$/, "linux-x86_64-tar"],
 ];
 const platforms = {};
 for (const file of fs.readdirSync(sigs)) {

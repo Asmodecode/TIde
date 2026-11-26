@@ -4375,6 +4375,7 @@ dependencies = [
 name = "tide"
 version = "2.1.0"
 dependencies = [
+ "flate2",
  "glib",
  "notify",
  "nusb",
@@ -4382,6 +4383,7 @@ dependencies = [
  "serde",
  "serde_json",
  "serialport",
+ "tar",
  "tauri",
  "tauri-build",
  "tauri-plugin-dialog",

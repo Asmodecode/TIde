@@ -151,6 +151,7 @@ pub fn run() {
         .plugin(tauri_plugin_process::init())
         .invoke_handler(tauri::generate_handler![
             update::update_check,
+            update::update_install_tar,
             save_program,
             load_program,
             delete_program,

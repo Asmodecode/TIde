@@ -32,6 +32,7 @@ The `.app.zip` files (`TIde_<version>_aarch64.app.zip`, `TIde_<version>_x64.app.
 - **Debian, Ubuntu and similar:** `sudo apt install ./TIde_<version>_amd64.deb`
 - **Fedora, openSUSE and similar:** `sudo dnf install ./TIde-<version>-1.x86_64.rpm`
 - **Any distribution:** `TIde_<version>_amd64.AppImage`: make it executable with `chmod +x TIde_<version>_amd64.AppImage`, then run it.
+- **Without installing:** `TIde_<version>_amd64.tar.gz` holds the `tide` program on its own: unpack it with `tar -xzf TIde_<version>_amd64.tar.gz` and run `TIde/tide`. It needs WebKitGTK 4.1 from your distribution. When an update can't install itself the usual way (TIde was installed some other way, or into a folder only root can change), TIde updates from this archive instead, and asks for your password if it needs to.
 
 ### In the browser
 

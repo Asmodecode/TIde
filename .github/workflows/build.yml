@@ -176,6 +176,29 @@ jobs:
           # .deb and the AppImage (what the Nightly channel updates from). Releases build all three.
           args: ${{ matrix.args }} --config src-tauri/tauri.ci.conf.json ${{ needs.prepare.outputs.stable != 'true' && runner.os == 'Linux' && '--bundles deb,appimage' || '' }}
 
+      # TIde on its own in a .tar.gz, signed like the other update files: what installed apps on Linux
+      # update from when the updater can't install the AppImage, .deb or .rpm (update.rs), and a way to
+      # run TIde without installing it. The upload step below sends everything in release-extras.
+      - name: Linux .tar.gz
+        if: runner.os == 'Linux'
+        shell: bash
+        env:
+          VERSION: ${{ needs.prepare.outputs.version }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        run: |
+          set -euo pipefail
+          extras=src-tauri/target/release-extras
+          stage="$RUNNER_TEMP/TIde"
+          mkdir -p "$extras" "$stage"
+          install -m 755 src-tauri/target/release/tide "$stage/tide"
+          cp LICENSE "$stage/"
+          cp src-tauri/icons/icon.png "$stage/tide.png"
+          archive="$extras/TIde_${VERSION}_amd64.tar.gz"
+          tar -C "$RUNNER_TEMP" -czf "$archive" TIde
+          npx tauri signer sign "$archive"
+          ls -l "$archive" "$archive.sig"
+
       - name: Upload installers to the release
         shell: bash   # the default on Windows is PowerShell
         env:

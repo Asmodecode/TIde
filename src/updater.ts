@@ -117,6 +117,18 @@ async function installUpdate() {
     });
     await relaunch();
   } catch (err) {
+    // On Linux the updater installs only an AppImage, .deb or .rpm; anything else gets the release's .tar.gz.
+    if (navigator.userAgent.includes("Linux")) {
+      say(`Update failed (${err}). Trying the .tar.gz instead…`);
+      try {
+        const version = await invoke<string>("update_install_tar", { channel: settings().updateChannel });
+        say(`Installed TIde ${version}. Restarting…`);
+        await relaunch();
+        return;
+      } catch (tarErr) {
+        err = `${err}; the .tar.gz too: ${tarErr}`;
+      }
+    }
     say(`Update failed: ${err}`);
     ui.install.disabled = ui.now.disabled = false;
     ui.install.textContent = "Update and restart";
