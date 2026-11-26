@@ -848,7 +848,7 @@ export function createCalc(opts: {
     ctx.fillStyle = "#101418";
     ctx.fillRect(0, 0, ui.lcd.width, ui.lcd.height);
     ctx.fillStyle = "#8b9cbb";
-    ctx.font = `600 ${Math.round(ui.lcd.height / 12)}px system-ui, sans-serif`;
+    ctx.font = `600 ${Math.round(ui.lcd.height / 12)}px ${getComputedStyle(document.body).getPropertyValue("--ui")}`;
     ctx.textAlign = "center";
     ctx.textBaseline = "middle";
     ctx.fillText(text, ui.lcd.width / 2, ui.lcd.height / 2);

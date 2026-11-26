@@ -58,6 +58,10 @@ export function createTerminal(opts: {
     macOptionIsMeta: true,
     rightClickSelectsWord: false,
   });
+  // The bundled code font may load after the terminal measured its cells: setting it again re-measures.
+  void document.fonts.load('13px "JetBrains Mono Variable"').then(() => {
+    term.options.fontFamily = getComputedStyle(document.body).getPropertyValue("--mono") || "monospace";
+  });
   // Follows dark and light mode (theme.ts sets the attribute).
   new MutationObserver(() => { term.options.theme = themeNow(); }).observe(document.documentElement, { attributes: true, attributeFilter: ["data-theme"] });
   const fit = new FitAddon();

@@ -1,4 +1,6 @@
 /// <reference types="vite/client" />
+import "@fontsource-variable/inter";
+import "@fontsource-variable/jetbrains-mono";
 import * as monaco from "monaco-editor/editor/editor.api.js";
 // The bare API ships no editor widgets, so the full entry is imported for its side effects.
 import "monaco-editor"; // full entry: registers suggest, hover, parameter hints, folding and marker navigation
@@ -335,6 +337,8 @@ const editor = monaco.editor.create($("editor"), {
   // Files dropped on the editor open in tabs (setUpDragging), rather than going into the text.
   dropIntoEditor: { enabled: false },
 });
+// The bundled code font loads after the editor measured its characters: measure again once it's in.
+void document.fonts.load(`${settings().fontSize}px "JetBrains Mono Variable"`).then(() => monaco.editor.remeasureFonts());
 
 const docs = new Map<string, Doc>();
 const views = new Map<string, View>();

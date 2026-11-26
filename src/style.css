@@ -18,8 +18,9 @@
     --wave-top: #38bdf8;
     --wave-mid: #2563eb;
     --wave-bot: #1e40af;
-    --ui: system-ui, -apple-system, "Segoe UI", sans-serif;
-    --mono: "Cascadia Code", "JetBrains Mono", "SF Mono", Consolas, monospace;
+    /* Bundled with TIde (@fontsource-variable, imported in main.ts), so every system shows the same type. */
+    --ui: "Inter Variable", system-ui, -apple-system, "Segoe UI", sans-serif;
+    --mono: "JetBrains Mono Variable", "Cascadia Code", "SF Mono", Consolas, monospace;
     --scroll: #2a4579;
     --ok: #86d9a8;
     /* ANSI colors in Output and Console: normal, then bright. */
@@ -99,6 +100,8 @@ body {
 }
 body {
     font: 13px/1.4 var(--ui);
+    font-optical-sizing: auto;
+    -webkit-font-smoothing: antialiased;
     background: var(--body);
     color: var(--ink);
     overflow: hidden;
@@ -2712,4 +2715,15 @@ body {
     .setup-choices { padding-left: 0; }
     .setup-step { grid-template-columns: minmax(0, 1fr) auto; }
     .setup-step-kind { grid-column: 1 / -1; }
+}
+
+/* Monaco's own widgets (hovers, suggestions, find, menus) name system fonts; use TIde's. The code
+   itself takes --mono through the editor's fontFamily option. */
+.monaco-editor,
+.monaco-hover,
+.monaco-editor .suggest-widget,
+.monaco-editor .find-widget,
+.monaco-menu-container,
+.context-view {
+    font-family: var(--ui);
 }
