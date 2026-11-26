@@ -1,6 +1,6 @@
 [package]
 name = "tide"
-version = "2.1.0"
+version = "2.1.1"
 license = "GPL-3.0-or-later"
 description = "A desktop IDE for TI calculators"
 authors = ["you"]
