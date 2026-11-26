@@ -1,10 +1,12 @@
-## TIde 2.0.1
+## TIde 2.1.0
 
-- **Nightly updates:** **Settings → Updates → Update channel** can now be **Nightly**, which updates to every build of TIde's main branch, with the newest changes before they're released. **Stable**, the default, updates to each release, as before. A nightly is numbered after the release it leads to (2.0.2-80 comes before 2.0.2), so the next stable release still reaches nightly users.
-- **The web version** (https://xsamuraicoder.github.io/TIde/):
-  - **Installs as an app:** **Install** at the top right, or your browser's own menu (Chrome and Edge install it; Safari adds it to the Dock). An installed TIde opens from your apps, and opens offline too.
-  - **A nightly of its own**, from every push to main, at https://xsamuraicoder.github.io/TIde/nightly/. It installs as its own app, TIde Nightly. The stable web version changes only with releases.
-  - **Only what works in a browser:** it no longer shows source control, the terminal, update checks or the TI-Nspire's command-line tools, which are in the desktop app. Deleting in the Explorer now says it's permanent, as it always was in a browser, instead of offering the Recycle Bin.
-- **Smaller fixes:** the Settings text fields (the Ndless SDK folder and the Luna command) match the other fields, and leftover styles from old views are gone.
+- **What's a ROM?** The **Calculator images** window now explains what a ROM is and why TIde can't include one, on every tab. Thanks to @Asmodecode for this, in their first contribution to TIde (#3).
+- **New type:** TIde now comes with its own fonts, Inter for the interface and JetBrains Mono for code, the terminal and the console, so it looks the same on every system, offline too.
+- **The calculator panel:**
+  - **Calculator images** no longer shrinks to a single line: the window fits its images and scrolls when there are many.
+  - The model menu matches the rest of the bar instead of showing the system's grey box, and the bar wraps onto a second row in narrow windows.
+  - In small windows, the screen and keypad can always be scrolled into view.
+  - In light mode, pressed keys keep their colours.
+- **Linux:** TIde's icon now shows on Wayland desktops, in the taskbar and window switcher, and the packages include sharper large icons.
 
-Everything new in 2.0.0 is here too: the TI-Nspire CX, every CE calculator, setting up a folder, and images in the editor.
+Everything in 2.0.1 and 2.0.0 is here too: nightly updates, the installable web version, the TI-Nspire CX, every CE calculator, setting up a folder, and images in the editor.
