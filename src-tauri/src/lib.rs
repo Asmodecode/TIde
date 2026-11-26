@@ -132,6 +132,11 @@ fn list_programs(app: tauri::AppHandle) -> Result<Vec<String>, String> {
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    // On Wayland the window's app ID is GTK's program name (the binary, "tide"), and the desktop
+    // finds the window's icon by a .desktop file of that exact name. The bundles install TIde.desktop.
+    #[cfg(target_os = "linux")]
+    glib::set_prgname(Some("TIde"));
+
     tauri::Builder::default()
         // Windows and Linux pass a double-clicked file on the command line; macOS sends RunEvent::Opened.
         .manage(shell::Shells::default())

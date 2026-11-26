@@ -2,7 +2,7 @@
 name = "tide"
 version = "2.0.1"
 license = "GPL-3.0-or-later"
-description = "A Tauri App"
+description = "A desktop IDE for TI calculators"
 authors = ["you"]
 edition = "2024"
 
@@ -31,6 +31,9 @@ notify = "8"
 nusb = "0.2.9"
 portable-pty = "0.9.0"
 serialport = "4.10.1"
+
+[target.'cfg(target_os = "linux")'.dependencies]
+glib = "0.18"
 
 
 # Read the optimization guideline for more details: https://tauri.app/concept/size/#cargo-configuration
