@@ -2429,26 +2429,17 @@ body {
 .images-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--rule); flex: none; }
 .images-tab.ready .images-dot { background: var(--ok); }
 
-.images-body { flex: 1; min-height: 0; overflow-y: auto; padding: 16px 20px; display: flex; flex-direction: column; gap: 10px; }
+.images-body { flex: 1 1 auto; min-height: 0; overflow-y: auto; padding: 16px 20px; display: flex; flex-direction: column; gap: 10px; }
+/* The body scrolls; its cards and notes keep their own height instead of being squeezed to fit. */
+.images-body > * { flex-shrink: 0; }
 .images-intro { font-size: 12.5px; color: var(--muted); margin-bottom: 2px; }
-.rom-help {
-  font-size: 12.5px;
-  color: var(--muted);
-  border: 1px solid var(--rule);
-  border-radius: 8px;
-  padding: 9px 12px;
-}
-
-.rom-help summary {
-  color: var(--ink);
-  font-weight: 600;
-  cursor: pointer;
-}
-
-.rom-help p {
-  margin: 8px 0 0;
-  line-height: 1.5;
-}
+.rom-help { font-size: 12.5px; color: var(--muted); border: 1px solid var(--rule); border-radius: 8px; }
+.rom-help summary { display: flex; align-items: center; gap: 8px; padding: 9px 12px; font-weight: 600; color: var(--ink); cursor: pointer; list-style: none; border-radius: 8px; }
+.rom-help summary::-webkit-details-marker { display: none; }
+.rom-help summary::before { content: ""; width: 6px; height: 6px; border: solid var(--muted); border-width: 0 1.5px 1.5px 0; transform: rotate(-45deg); transition: transform .15s; flex: none; }
+.rom-help[open] summary::before { transform: rotate(45deg); }
+.rom-help summary:hover, .rom-help summary:hover::before { color: var(--key); border-color: var(--key); }
+.rom-help p { margin: 0; padding: 0 12px 10px 26px; line-height: 1.5; }
 .images-empty { padding: 22px 12px; text-align: center; font-size: 12.5px; color: var(--muted); border: 1px dashed var(--rule); border-radius: 8px; }
 
 .image-card {

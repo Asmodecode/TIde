@@ -1264,10 +1264,7 @@ export function createCalc(opts: {
     const intro = (text: string) => el("p", { className: "images-intro" }, text);
     const romHelp = () => el("details", { className: "rom-help" },
       el("summary", {}, "What the heck is a ROM?"),
-      el("p", {}, "A ROM (Read-Only Memory) is a digital image of the software stored inside your calculator. It contains the operating system and other low-level code that tells the calculator how to work. In order to get TIde to emulate your calculator, you'll need to provide the appropriate ROM image. The process differs for each calculator model. TIde does not provide ROMs due to copyright restrictions, so you must obtain these from your own calculator. ")
-  );
-
-
+      el("p", {}, "A ROM (Read-Only Memory) is a digital image of the software stored inside your calculator. It contains the operating system and other low-level code that tells the calculator how to work. In order to get TIde to emulate your calculator, you'll need to provide the appropriate ROM image. The process differs for each calculator model. TIde does not provide ROMs due to copyright restrictions, so you must obtain these from your own calculator. "));
     const footer = (...kids: HTMLElement[]) => el("div", { className: "images-section-actions" }, ...kids);
 
     const tabs: [ImagesTab, string, boolean][] = [
@@ -1297,6 +1294,7 @@ export function createCalc(opts: {
       ],
       nspire: () => [
         intro("The TI-Nspire CX runs from two images dumped from your own calculator. The flash image is its whole memory, not an OS file (.tcc, .tco, .tcc2)."),
+        romHelp(),
         imageCard("Boot1 image", ns.boot1 ? `${ns.boot1_size ? mb(ns.boot1_size) : "512 KB"} · boot1.img` : "512 KB", ns.boot1, [chooser("boot1", ns.boot1)]),
         imageCard("Flash image", ns.flash ? `${ns.flash_size ? mb(ns.flash_size) : ""} · flash.img` : "132 MB (CX, CX II) or 33 MB (older models)", ns.flash, [chooser("flash", ns.flash)]),
         footer(
@@ -1305,6 +1303,7 @@ export function createCalc(opts: {
       ],
       roms: () => [
         intro("ROMs for the TI-73, 81, 82, 83, 83 Plus, 84 Plus, 85 and 86 run in Wabbitemu. TIde reads each one's model and OS."),
+        romHelp(),
         ...(have.roms.length
           ? have.roms.map(name => {
               const info = romInfo[name];
