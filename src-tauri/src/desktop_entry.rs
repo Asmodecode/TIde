@@ -25,16 +25,27 @@ const ICONS: [(u32, &[u8]); 5] = [
 pub fn ensure() {
     let Some(data_home) = data_home() else { return };
     let file = data_home.join("applications").join(format!("{APP_ID}.desktop"));
-    // A package's own entry wins: leave it, and don't add a second one.
+    // A package's own entry wins. One TIde wrote before the package was installed would hide it
+    // (an entry in your home folder overrides the system's of the same name), so it goes, with its icons.
     if data_dirs().iter().any(|dir| {
         let path = dir.join("applications").join(format!("{APP_ID}.desktop"));
         path != file && path.is_file()
     }) {
+        if fs::read_to_string(&file).is_ok_and(|t| t.contains(GENERATED)) {
+            let _ = fs::remove_file(&file);
+            for (size, _) in ICONS {
+                let _ = fs::remove_file(data_home.join(format!("icons/hicolor/{size}x{size}/apps/{APP_ID}.png")));
+            }
+        }
         return;
     }
     if let Ok(existing) = fs::read_to_string(&file) {
         if !existing.contains(GENERATED) {
             return; // someone's own TIde.desktop: theirs to keep
+        }
+        // A release build's launcher stays: a dev build only needs one for its icon, and that does.
+        if cfg!(debug_assertions) && !existing.contains("NoDisplay=true") {
+            return;
         }
     }
     let Some(exe) = executable() else { return };
