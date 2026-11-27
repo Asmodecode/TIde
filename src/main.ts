@@ -21,6 +21,7 @@ import { getVersion as appVersion } from "@tauri-apps/api/app";
 import { createScm } from "./scm";
 import { showMenu, type MenuItem } from "./menu";
 import "./select-popup"; // TIde's own option list for every <select>
+import { offerToolchain, type ToolchainOffer } from "./toolchain-setup";
 import { SEND_TYPES, TREE_DRAG, createCalc, unbundle } from "./calc";
 import {
   ENCODINGS,
@@ -88,7 +89,7 @@ import { createExtensionsView } from "./extensions-view";
 import { createPanel } from "./panel";
 import { assemble, programName } from "./spasm";
 import { runWebMake } from "./webmake";
-import { fs, normalizeName, store, type Entry } from "./store";
+import { fs, normalizeName, store, type Entry, type ToolchainKind, type ToolchainStatus } from "./store";
 
 (self as unknown as { MonacoEnvironment: object }).MonacoEnvironment = {
   getWorker: (_: unknown, label: string) =>
@@ -1097,6 +1098,144 @@ async function expandHome(path: string): Promise<string> {
   const home = await fs.homeDir().catch(() => "");
   return home ? joinPath(home, path.slice(2)) : path;
 }
+// ── Toolchains: offering to install the one a project builds with, when it isn't there ──
+
+const TOOLCHAIN_SKIP_PREF = "tide-pref-toolchain-skip"; // "<root>\n<kind>" for "Don't ask again"
+/** The projects and toolchains asked about this session, so it's once each. */
+const toolchainAsked = new Set<string>();
+function toolchainSkipped(): string[] {
+  try {
+    const list: unknown = JSON.parse(localStorage.getItem(TOOLCHAIN_SKIP_PREF) ?? "[]");
+    return Array.isArray(list) ? list.filter((s): s is string => typeof s === "string") : [];
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * The toolchain the open project builds with, in the desktop app: the CE toolchain for a CE C, C++,
+ * eZ80 or py2ez80 project with a Makefile or a build line, the Ndless SDK for a Nspire C or C++ one,
+ * and Luna for Nspire scripts. Null when TIde builds it itself (TI-BASIC, assembly, the web version).
+ */
+async function neededToolchain(): Promise<ToolchainKind | null> {
+  if (fs.web || !project) return null;
+  const language = config.language;
+  const builds = project.hasMakefile || !!config.build;
+  if (await nspireProject()) {
+    if (language === "lua" || language === "tipython") return "luna";
+    return builds && (!language || language === "c" || language === "cpp") ? "ndless" : null;
+  }
+  const calculator = isTarget(config.calculator) ? config.calculator : getTarget();
+  const compiled = !language || ["c", "cpp", "ez80", "py2ez80"].includes(language);
+  return calculator === "ce" && builds && compiled ? "ce" : null;
+}
+
+/** The setting that says where a toolchain is. */
+const TOOLCHAIN_SETTING = { ce: "cedevHome", ndless: "ndlessHome", luna: "luna" } as const;
+
+/**
+ * Asks to install the open project's toolchain when it isn't there (or make, which its build runs):
+ * once a session for each project, when it opens or before it builds, unless told not to ask again.
+ * Resolves when the window closes, or at once when nothing's missing.
+ */
+async function checkToolchain() {
+  const kind = await neededToolchain();
+  if (!kind || !project) return;
+  const root = project.root, key = `${root}\n${kind}`;
+  if (toolchainAsked.has(key) || toolchainSkipped().includes(key)) return;
+  const home = await expandHome(settings()[TOOLCHAIN_SETTING[kind]]);
+  const status = await fs.toolchain.status(kind, home).catch(() => null);
+  if (!status || (status.found && status.make) || project?.root !== root) return;
+  toolchainAsked.add(key);
+  const answer = await offerToolchain(toolchainOffer(kind, status, project.name));
+  if (answer === "never") {
+    try {
+      localStorage.setItem(TOOLCHAIN_SKIP_PREF, JSON.stringify([...new Set([...toolchainSkipped(), key])].slice(-200)));
+    } catch {
+      /* storage unavailable */
+    }
+  } else if (answer === "installed" || answer === "used") {
+    refreshSettingsPage();
+  }
+}
+
+/** What the window says and offers for a toolchain, from what's missing. */
+function toolchainOffer(kind: ToolchainKind, status: ToolchainStatus, name: string): ToolchainOffer {
+  const openUrl = (url: string) => void import("@tauri-apps/plugin-opener").then((o) => o.openUrl(url));
+  const mac = navigator.userAgent.includes("Mac");
+  const makeNote = status.make
+    ? undefined
+    : mac
+      ? "make isn't installed, and building runs it. Install Apple's command line tools: run xcode-select --install in a terminal."
+      : "make isn't installed, and building runs it. Install it with your system's package manager: sudo apt install make, sudo dnf install make or sudo pacman -S make.";
+  const remember = `Don't ask again for ${name}`;
+  /** Settings points to the folder (or program) picked, if it's the toolchain. */
+  const useFolder = (what: string, check: string) => async () => {
+    const folder = await fs.pickFolder();
+    if (!folder) return false;
+    if (!(await fs.toolchain.status(kind, folder)).found)
+      throw new Error(`${folder} isn't ${what}: it has no ${check}. Pick the folder it's installed in.`);
+    setSetting(TOOLCHAIN_SETTING[kind], folder);
+    setMessage(`Using ${what} in ${folder}`);
+    return true;
+  };
+  if (status.found) {
+    // Only make is missing.
+    return { title: "Install make?", body: `${name} builds with make, which TIde can't find.`, note: makeNote, remember, openUrl };
+  }
+  if (kind === "ce") {
+    return {
+      title: "Install the CE toolchain?",
+      body: `${name} is a CE C project, and building it needs the CE C/C++ toolchain (CEdev), which TIde can't find. TIde can download the official release (about 50 MB) from GitHub into its data folder, and use it for every CE project.`,
+      // Windows' toolchain has its own make.
+      note: isWindows ? undefined : makeNote,
+      install: {
+        label: "Download and install",
+        busy: "Downloading… (about 50 MB)",
+        run: async () => {
+          const path = await fs.toolchain.installCe();
+          setSetting("cedevHome", path);
+          setMessage("Installed the CE toolchain");
+          return `Installed in ${path}. Settings → Toolchains has it.`;
+        },
+      },
+      use: { label: "Use one I have…", run: useFolder("the CE toolchain", "meta/makefile.mk") },
+      guide: { label: "About the toolchain", url: "https://ce-programming.github.io/toolchain/static/getting-started.html" },
+      remember,
+      openUrl,
+    };
+  }
+  if (kind === "ndless") {
+    return {
+      title: "Set up the Ndless SDK?",
+      body: `${name} is a TI-Nspire C project, and building it needs the Ndless SDK (nspire-gcc), which TIde can't find. It has no ready-made download: build it once with its guide, then show TIde where it is.`,
+      note: makeNote,
+      use: { label: "Use one I have…", run: useFolder("the Ndless SDK", "nspire-gcc") },
+      guide: { label: "How to install it", url: "https://github.com/ndless-nspire/Ndless/wiki/Ndless-SDK:-C-and-assembly-development-introduction" },
+      remember,
+      openUrl,
+    };
+  }
+  return {
+    title: "Set up Luna?",
+    body: `${name} is a TI-Nspire script project, and Run packs its scripts into .tns documents with Luna, which TIde can't find.`,
+    use: {
+      label: "Choose the Luna program…",
+      run: async () => {
+        const path = await fs.pickFile("The Luna program", isWindows ? ["exe"] : []);
+        if (!path) return false;
+        if (!(await fs.toolchain.status("luna", path)).found) throw new Error(`${path} isn't there.`);
+        setSetting("luna", path);
+        setMessage(`Using Luna at ${path}`);
+        return true;
+      },
+    },
+    guide: { label: "How to install it", url: "https://github.com/ndless-nspire/Luna" },
+    remember,
+    openUrl,
+  };
+}
+
 /** Whether the open project builds for the Nspire: its tide.json, its target, or its Makefile's Ndless tools. */
 const nspireProject = async () =>
   config.calculator === "nspire" || (!!project && getTarget() === "nspire") || (await makefileIsNdless());
@@ -1124,6 +1263,7 @@ async function packWithLuna(
   srcPath: string,
   outPath: string,
 ): Promise<boolean> {
+  await checkToolchain();
   const luna = settings().luna.trim() || "luna";
   const { ok, output: text } = await runLine(
     "Luna",
@@ -1806,6 +1946,7 @@ async function buildProject(): Promise<boolean> {
     if (doc.id.startsWith("file:") && isDirty(doc) && !(await saveDoc(doc)))
       return false;
   }
+  await checkToolchain();
   building = true;
   els.exportBtn.disabled = true;
   setMessage(`Building ${name}…`);
@@ -2681,7 +2822,10 @@ async function loadProject(root: string, reveal = true) {
   }
   await loadConfig(entries.some((e) => e.isDir && e.name === CONFIG_DIR));
   // What tide.json leaves out (its calculator, its language), the setup popup asks, or the files show.
-  void settleProject(root, entries);
+  // Then, once that's settled, whether its toolchain is installed.
+  void settleProject(root, entries).then(() => {
+    if (project?.root === root) void checkToolchain();
+  });
   if (reveal) showPane("files");
   renderTree();
   applyEditorMode(); // the docs and Build button follow the project type

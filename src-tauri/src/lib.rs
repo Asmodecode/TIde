@@ -13,6 +13,7 @@ mod project;
 mod pty;
 mod serial;
 mod shell;
+mod toolchain;
 mod update;
 mod watch;
 
@@ -179,6 +180,8 @@ pub fn run() {
             git::git_pull,
             git::git_init,
             emulator::emulator_status,
+            toolchain::toolchain_status,
+            toolchain::toolchain_install_ce,
             emulator::emulator_install,
             emulator::emulator_stage,
             emulator::emulator_run,

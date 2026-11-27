@@ -161,6 +161,22 @@ export interface Fs {
   movePath(from: string, to: string): Promise<void>;
   git: Git;
   emulator: Emulator;
+  /** The toolchains projects build with (toolchain.rs): whether they're installed, and installing the CE toolchain. */
+  toolchain: {
+    status(kind: ToolchainKind, home: string): Promise<ToolchainStatus>;
+    /** Downloads the CE toolchain into TIde's data folder; resolves with its folder. */
+    installCe(): Promise<string>;
+  };
+}
+
+/** "ce": the CE C/C++ toolchain (CEdev). "ndless": the Ndless SDK, for the TI-Nspire. "luna": Luna, which packs .tns scripts. */
+export type ToolchainKind = "ce" | "ndless" | "luna";
+export interface ToolchainStatus {
+  found: boolean;
+  /** The toolchain's folder, or Luna's program. */
+  path: string | null;
+  /** Whether make is there too. */
+  make: boolean;
 }
 
 /** CEmu, downloaded on first use and started as its own program. */
@@ -263,9 +279,11 @@ export const fs: Fs = isTauri
       },
       async pickFile(label, extensions) {
         const { open } = await import("@tauri-apps/plugin-dialog");
+        // No extensions: any file, such as a program without one.
         const picked = await open({
           multiple: false,
-          filters: [{ name: label, extensions }],
+          title: label,
+          filters: extensions.length ? [{ name: label, extensions }] : undefined,
         });
         return typeof picked === "string" ? picked : null;
       },
@@ -333,6 +351,10 @@ export const fs: Fs = isTauri
         pull: (dir) => invoke<GitResult>("git_pull", { dir }),
         init: (dir) => invoke<GitResult>("git_init", { dir }),
       },
+      toolchain: {
+        status: (kind, home) => invoke<ToolchainStatus>("toolchain_status", { kind, home: home || null }),
+        installCe: () => invoke<string>("toolchain_install_ce"),
+      },
       emulator: {
         status: () => invoke<string | null>("emulator_status"),
         install: () => invoke<string>("emulator_install"),
@@ -374,6 +396,11 @@ export const fs: Fs = isTauri
       takeOpenedFiles: async () => [],
       deletePath: (path) => webFs.deletePath(path),
       movePath: webFs.movePath,
+      toolchain: {
+        // The web version builds CE projects with its own toolchain, in the browser.
+        status: async () => ({ found: true, path: null, make: true }),
+        installCe: desktopOnly,
+      },
       emulator: {
         status: async () => null,
         install: desktopOnly,

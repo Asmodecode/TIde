@@ -3018,3 +3018,66 @@ select:is([aria-expanded="true"]) {
     color: var(--ok);
     background: color-mix(in srgb, var(--ok) 14%, transparent);
 }
+
+/* "Install the toolchain?" (toolchain-setup.ts), in TIde's dialog frame */
+.toolchain-dialog {
+    width: min(520px, 92vw);
+}
+.toolchain-dialog .hint {
+    line-height: 1.5;
+}
+.toolchain-note {
+    margin-top: 10px;
+    padding: 8px 12px;
+    font-size: 12.5px;
+    line-height: 1.45;
+    color: var(--ink);
+    background: color-mix(in srgb, var(--warn) 12%, transparent);
+    border-left: 3px solid var(--warn);
+    border-radius: 3px;
+    user-select: text;
+}
+.toolchain-status {
+    margin-top: 10px;
+    font-size: 12.5px;
+    color: var(--muted);
+    overflow-wrap: anywhere;
+    user-select: text;
+}
+.toolchain-status.ok {
+    color: var(--ok);
+}
+.toolchain-status.err {
+    color: var(--danger);
+}
+.toolchain-never {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-top: 14px;
+    font-size: 12.5px;
+    color: var(--muted);
+    cursor: pointer;
+}
+.toolchain-never input {
+    width: 14px;
+    height: 14px;
+    margin: 0;
+    accent-color: var(--key);
+    cursor: pointer;
+}
+.toolchain-dialog .actions {
+    align-items: center;
+}
+.toolchain-dialog .actions .spacer {
+    flex: 1;
+}
+.toolchain-guide {
+    font-size: 12.5px;
+    color: var(--key);
+    text-decoration: none;
+    cursor: pointer;
+}
+.toolchain-guide:hover {
+    text-decoration: underline;
+}
