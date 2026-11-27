@@ -176,6 +176,15 @@ jobs:
           # .deb and the AppImage (what the Nightly channel updates from). Releases build all three.
           args: ${{ matrix.args }} --config src-tauri/tauri.ci.conf.json ${{ needs.prepare.outputs.stable != 'true' && runner.os == 'Linux' && '--bundles deb,appimage' || '' }}
 
+      # The .deb's package is "tide": Tauri names it "t-ide", from productName (rename-deb.sh).
+      - name: Name the .deb package tide
+        if: runner.os == 'Linux'
+        shell: bash
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        run: .github/rename-deb.sh src-tauri/target/release/bundle/deb/*.deb
+
       # TIde on its own in a .tar.gz, signed like the other update files: what installed apps on Linux
       # update from when the updater can't install the AppImage, .deb or .rpm (update.rs), and a way to
       # run TIde without installing it. The upload step below sends everything in release-extras.
