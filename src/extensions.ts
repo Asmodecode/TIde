@@ -12,6 +12,7 @@ import type { Settings } from "./settings";
 import { parseJsonc } from "./config";
 import { packTideex, unpackTideex, type PackedFile } from "./tideex";
 import { builtInLanguage } from "./language-support";
+import { registerTheme, type Theme } from "./theme";
 
 const BUILT_IN_NAMES: Record<string, string> = {
   tibasic: "TI-BASIC",
@@ -64,6 +65,8 @@ export interface ExtensionManifest {
     completions?: Completion[];
     hovers?: Hover[];
     languages?: LanguageContribution[];
+    /** Themes for Settings → Theme: an id, a name, a base ("dark" or "light"), colors and syntax (theme.ts). */
+    themes?: Theme[];
   };
 }
 
@@ -348,6 +351,15 @@ function contribute(ext: Extension, undo: (() => void)[]) {
   const words = [...hovers.values()].reduce((n, m) => n + m.size, 0);
   if (words)
     ext.added.push(`hover help for ${words} word${words > 1 ? "s" : ""}`);
+  // Themes, for Settings → Theme. One that isn't right is left out, and the Extensions view says why.
+  for (const theme of c.themes ?? []) {
+    try {
+      undo.push(registerTheme(theme, ext.manifest.name));
+      ext.added.push(`the ${theme.name} theme`);
+    } catch (err) {
+      ext.added.push(`no theme: ${err instanceof Error ? err.message : err}`);
+    }
+  }
 }
 
 // ── The API main.js gets ──
@@ -1027,7 +1039,7 @@ interface Tide {
   readonly subscriptions: { push(...items: Disposable[]): void };
   readonly commands: {
     /**
-     * Adds a command to the File menu and the editor's right-click menu. With when, it shows only
+     * Adds a command to the Run menu and the editor's right-click menu. With when, it shows only
      * in the projects it's for: { project: true } while a folder is open, { calculator: ["nspire"] }
      * in a project for those calculators, { language: ["c", "cpp"] } in one in those languages.
      */

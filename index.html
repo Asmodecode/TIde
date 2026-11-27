@@ -7,8 +7,16 @@
         <link rel="icon" type="image/png" href="/app-icon.png" />
         <link rel="apple-touch-icon" href="/app-icon.png" />
         <script>
-            // Light or dark before anything is drawn, so the page doesn't flash the other one (theme.ts keeps it up to date).
+            // The theme before anything is drawn, so the page doesn't flash another one: theme.ts keeps
+            // the one in use (its base and the colors it sets) in tide-pref-theme-paint.
             try {
+                const paint = JSON.parse(localStorage.getItem("tide-pref-theme-paint") || "null");
+                if (paint && (paint.base === "dark" || paint.base === "light")) {
+                    document.documentElement.dataset.theme = paint.base;
+                    for (const [name, value] of Object.entries(paint.colors || {}))
+                        if (/^#[0-9a-f]{3,6}$/i.test(value)) document.documentElement.style.setProperty("--" + name, value);
+                    throw "painted";
+                }
                 const theme =
                     JSON.parse(
                         localStorage.getItem("tide-pref-settings") || "{}",
@@ -21,13 +29,15 @@
                     ? "light"
                     : "dark";
             } catch {
-                /* storage unavailable: dark */
+                /* painted, or storage unavailable: dark */
             }
         </script>
         <link rel="stylesheet" href="/src/style.css" />
     </head>
     <body>
         <div class="app">
+            <!-- The menu bar: main.ts setUpMenubar fills in File, Edit, View, Run, Calculator and Help -->
+            <header class="menubar" id="menubar" role="menubar" aria-label="Menu"></header>
             <nav class="activity" aria-label="Views">
                 <img class="logo" src="/app-icon.svg" alt="TIde" />
                 <button
@@ -114,19 +124,13 @@
             </nav>
 
             <aside class="side">
+                <div
+                    class="side-resize"
+                    id="side-resize"
+                    title="Drag to resize (double-click for the default width)"
+                ></div>
                 <div class="pane" id="pane-files">
-                    <div class="side-title side-title-row">
-                        <span>Explorer</span
-                        ><button
-                            id="file-menu"
-                            type="button"
-                            class="menu-button"
-                            title="File menu"
-                            aria-haspopup="menu"
-                        >
-                            File ▾
-                        </button>
-                    </div>
+                    <div class="side-title">Explorer</div>
                     <input
                         id="find"
                         placeholder="Find or create a program…"
@@ -199,7 +203,13 @@
                 <div class="pane" id="pane-scm" hidden>
                     <div class="side-title">Source Control</div>
                     <p class="hint scm-note" id="scm-note"></p>
-                    <button id="scm-init" class="scm-init" type="button" hidden>
+                    <button
+                        id="scm-init"
+                        class="scm-init"
+                        type="button"
+                        title="Initialize a git repository in this folder"
+                        hidden
+                    >
                         Initialize repository
                     </button>
                     <div class="scm-repo" id="scm-repo" hidden>

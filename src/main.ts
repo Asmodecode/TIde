@@ -1,6 +1,7 @@
 /// <reference types="vite/client" />
 import "@fontsource-variable/inter";
 import "@fontsource-variable/jetbrains-mono";
+import { applyFonts, chooseFontFile, FILE, fontFileName, FONTS, readFontFileName } from "./fonts";
 import * as monaco from "monaco-editor/editor/editor.api.js";
 // The bare API ships no editor widgets, so the full entry is imported for its side effects.
 import "monaco-editor"; // full entry: registers suggest, hover, parameter hints, folding and marker navigation
@@ -10,7 +11,7 @@ import tsWorker from "monaco-editor/language/typescript/ts.worker.js?worker";
 import { json as monacoJson, typescript as monacoTs } from "monaco-editor";
 import { languageFor, registerTiBasic, tiCatalog } from "./language";
 import { applyIndentation, registerIndentation } from "./indent";
-import { isLight, watchTheme } from "./theme";
+import { isLight, listThemes, startingEditorTheme, watchTheme } from "./theme";
 import { createSerialView } from "./serial-view";
 import { TARGETS, getTarget, isTarget, onTargetChange, setTarget, type Target } from "./target";
 import { C_CATALOG } from "./c-support";
@@ -19,7 +20,8 @@ import { TI_PYTHON_CATALOG } from "./tipython-support";
 import { ASM_CATALOG, ASM_LANG } from "./asm-support";
 import { getVersion as appVersion } from "@tauri-apps/api/app";
 import { createScm } from "./scm";
-import { showMenu, type MenuItem } from "./menu";
+import { menuIsOpen, showMenu, type MenuItem } from "./menu";
+import { openWindow, titleWindow, windowStart, type WindowStart } from "./windows";
 import "./select-popup"; // TIde's own option list for every <select>
 import { offerToolchain, type ToolchainOffer } from "./toolchain-setup";
 import { SEND_TYPES, TREE_DRAG, createCalc, unbundle } from "./calc";
@@ -314,13 +316,14 @@ function gutterOptions(): Pick<
 
 const editor = monaco.editor.create($("editor"), {
   model: null,
-  theme: isLight() ? "tide-light" : "tide",
+  theme: startingEditorTheme(),
   automaticLayout: true,
   fontSize: settings().fontSize,
   lineHeight: Math.round(settings().fontSize * 1.7),
   wordWrap: settings().wordWrap ? "on" : "off",
   renderWhitespace: settings().renderWhitespace,
   fontFamily: getComputedStyle(document.body).getPropertyValue("--mono"),
+  fontLigatures: settings().fontLigatures,
   minimap: { enabled: settings().minimap },
   rulers: [screenCols() - 1], // the calculator's editor width includes the leading ":"
   scrollBeyondLastLine: false,
@@ -343,6 +346,9 @@ const editor = monaco.editor.create($("editor"), {
 });
 // The bundled code font loads after the editor measured its characters: measure again once it's in.
 void document.fonts.load(`${settings().fontSize}px "JetBrains Mono Variable"`).then(() => monaco.editor.remeasureFonts());
+// The code and interface fonts you picked (fonts.ts), once they're loaded.
+void applyFonts(settings(), editor);
+void readFontFileName().then(() => refreshSettingsPage());
 
 const docs = new Map<string, Doc>();
 const views = new Map<string, View>();
@@ -359,6 +365,17 @@ const buildErrors = new Map<string, number>();
 
 // Project folder: entries are loaded one directory at a time, when it is first expanded.
 let project: { root: string; name: string; hasMakefile: boolean } | null = null;
+/**
+ * The folders open in this window: one, or several in a workspace. `project` is the active one,
+ * which builds, Source Control, the terminal and tide.json follow; it's the folder of the file
+ * you're in. A saved workspace is a .tide-workspace file listing its folders.
+ */
+let workspace: { file: string | null; folders: string[] } = { file: null, folders: [] };
+/** Workspace folders folded shut in the Explorer. */
+const foldedFolders = new Set<string>();
+const WORKSPACE_PREF = "tide-pref-workspace"; // not "tide:", which the browser store treats as a program
+const WORKSPACE_EXT = "tide-workspace";
+const nightlyWeb = fs.web && import.meta.env.BASE_URL.endsWith("/nightly/");
 /** The open project's tide.json, or {} when it has none. */
 let config: ProjectConfig = {};
 let building = false;
@@ -534,6 +551,11 @@ function activate(id: string, note?: string) {
       path: doc.id.startsWith("file:") ? doc.id.slice(5) : null,
       language: doc.language,
     });
+  // In a workspace, the file's folder becomes the active one.
+  if (doc?.id.startsWith("file:") && project && workspace.folders.length > 1) {
+    const folder = folderOf(doc.id.slice(5));
+    if (folder && samePath(folder) !== samePath(project.root)) void useFolder(folder);
+  }
 }
 
 /** Shows the active tab: its model in the editor, or its view over the editor. */
@@ -1392,6 +1414,21 @@ function openSettings() {
   );
 }
 
+/** Asks for a font file, keeps it, and switches TIde's font to it. */
+async function pickFontFile() {
+  try {
+    const name = await chooseFontFile();
+    // Cancelled: the list goes back to the font in use.
+    if (!name) return refreshSettingsPage();
+    setSetting("font", FILE);
+    refreshSettingsPage();
+    setMessage(`Font: ${name}`);
+  } catch (e) {
+    refreshSettingsPage();
+    setMessage(e instanceof Error ? e.message : String(e));
+  }
+}
+
 function settingRows(): Row[] {
   const s = settings();
   const toggle = (
@@ -1403,7 +1440,8 @@ function settingRows(): Row[] {
       | "checkUpdates"
       | "refreshScmOnFocus"
       | "shiftDeletes"
-      | "autoSave",
+      | "autoSave"
+      | "fontLigatures",
   ) => ({
     kind: "toggle" as const,
     get: () => settings()[key],
@@ -1411,6 +1449,8 @@ function settingRows(): Row[] {
   });
   const keyOf: Record<string, string> = {
     "Font size": "fontSize",
+    Font: "font",
+    Ligatures: "fontLigatures",
     "Tab size": "tabSize",
     "Word wrap": "wordWrap",
     Minimap: "minimap",
@@ -1423,17 +1463,49 @@ function settingRows(): Row[] {
     {
       section: "Appearance",
       label: "Theme",
-      description: "Dark or light mode, or whichever your system uses.",
+      description:
+        "TIde's colors: the window, the editor's syntax and the terminal. Same as the system is TIde Dark or TIde Light, as your system is. Extensions can add themes.",
       control: {
         kind: "select",
         options: [
-          ["dark", "Dark"],
-          ["light", "Light"],
+          ...listThemes().map(
+            (t) => [t.id, t.source ? `${t.name} (${t.source})` : t.name] as [string, string],
+          ),
           ["system", "Same as the system"],
         ],
         get: () => s.theme,
-        set: (v) => setSetting("theme", v as "dark" | "light" | "system"),
+        set: (v) => setSetting("theme", v),
       },
+    },
+    {
+      section: "Appearance",
+      label: "Font",
+      description:
+        "TIde's font, for the window, the editor and the terminal. Default is Inter for the window and JetBrains Mono for code; System is your computer's own pair; any other is used everywhere. All but System come with TIde. Font file… asks for a .ttf, .otf, .woff or .woff2 file.",
+      control: {
+        kind: "select",
+        options: [...FONTS.map((f) => [f.id, f.name] as [string, string]), [FILE, "Font file…"]],
+        get: () => s.font,
+        set: (v) => (v === FILE ? void pickFontFile() : setSetting("font", v)),
+      },
+    },
+    ...(s.font === FILE
+      ? [
+          {
+            section: "Appearance",
+            label: "Font file",
+            description: fontFileName()
+              ? `Using ${fontFileName()}. TIde keeps its own copy, so the file can move.`
+              : "The font file TIde keeps a copy of.",
+            control: { kind: "button" as const, label: "Choose another…", run: () => void pickFontFile() },
+          },
+        ]
+      : []),
+    {
+      section: "Appearance",
+      label: "Ligatures",
+      description: "Join characters such as -> and != into one symbol, in fonts that have them (Fira Code, JetBrains Mono).",
+      control: toggle("fontLigatures"),
     },
     {
       section: "Editor",
@@ -2803,11 +2875,24 @@ async function chooseTarget(target: Target) {
   }
 }
 
+/** Opens a folder on its own, in place of what this window had open. */
 async function loadProject(root: string, reveal = true) {
   const entries = await fs.readDir(root);
   dirCache.clear();
   expanded.clear();
+  foldedFolders.clear();
+  workspace = { file: null, folders: [root] };
+  await useFolder(root, reveal, entries);
+}
+
+/**
+ * Makes one of the workspace's folders the active one: its tide.json, Source Control, builds and
+ * terminal. Opening a file in another folder of the workspace does this for that folder.
+ */
+async function useFolder(root: string, reveal = false, read?: Entry[]) {
+  const entries = read ?? (await fs.readDir(root));
   dirCache.set(root, entries);
+  const switching = workspace.folders.length > 1 && !!project;
   const hasMakefile = entries.some(
     (e) => !e.isDir && /^(?:gnu)?makefile$/i.test(e.name),
   );
@@ -2820,6 +2905,7 @@ async function loadProject(root: string, reveal = true) {
   } catch {
     /* storage unavailable */
   }
+  saveWorkspacePref();
   await loadConfig(entries.some((e) => e.isDir && e.name === CONFIG_DIR));
   // What tide.json leaves out (its calculator, its language), the setup popup asks, or the files show.
   // Then, once that's settled, whether its toolchain is installed.
@@ -2829,14 +2915,189 @@ async function loadProject(root: string, reveal = true) {
   if (reveal) showPane("files");
   renderTree();
   applyEditorMode(); // the docs and Build button follow the project type
-  setMessage(`Opened ${hasMakefile ? "C project" : "folder"} ${project.name}`);
+  setMessage(
+    switching
+      ? `Working in ${project.name}: builds, Source Control and tide.json follow it`
+      : `Opened ${hasMakefile ? "C project" : "folder"} ${project.name}`,
+  );
   void scm.refresh();
   emit("project", { root, name: project.name });
   panel.projectChanged(root);
-  void fs
-    .watchFolder(root)
-    .catch((err) => console.error("Couldn't watch the folder", err));
+  watchWorkspace();
+  void titleWindow(workspaceName(), fs.desktop, nightlyWeb);
 }
+
+// ── Workspaces: several folders in one window ──
+const isAbsolute = (path: string) => /^(?:[a-zA-Z]:)?[\\/]/.test(path) || path.startsWith("/");
+/** What the window is called: the workspace file's name, or the folder's. */
+const workspaceName = () =>
+  workspace.file
+    ? baseName(workspace.file).replace(/\.tide-workspace$/i, "")
+    : workspace.folders.length > 1
+      ? `${project?.name ?? baseName(workspace.folders[0])} (workspace)`
+      : (project?.name ?? null);
+/** The workspace folder a path is in (the innermost, if folders are nested), or null. */
+function folderOf(path: string): string | null {
+  const p = samePath(path);
+  let best: string | null = null;
+  for (const f of workspace.folders) {
+    const root = samePath(f);
+    if ((p === root || p.startsWith(`${root}/`)) && (!best || root.length > samePath(best).length)) best = f;
+  }
+  return best;
+}
+function watchWorkspace() {
+  void fs
+    .watchFolders(workspace.folders)
+    .catch((err) => console.error("Couldn't watch the folders", err));
+}
+function saveWorkspacePref() {
+  try {
+    localStorage.setItem(
+      WORKSPACE_PREF,
+      JSON.stringify({ ...workspace, active: project?.root ?? null }),
+    );
+  } catch {
+    /* storage unavailable */
+  }
+}
+/** Rewrites a saved workspace's file when its folders change, as VS Code does. */
+async function writeWorkspaceFile() {
+  if (!workspace.file) return;
+  const dir = parentOf(workspace.file);
+  const folders = workspace.folders.map((f) => {
+    // Folders beside or below the file are kept relative, so the workspace moves with them.
+    const inside = samePath(f).startsWith(`${samePath(dir)}/`);
+    return { path: inside ? f.slice(dir.length + 1).replace(/\\/g, "/") : f };
+  });
+  try {
+    await fs.writeFile(workspace.file, `${JSON.stringify({ folders }, null, 2)}\n`);
+  } catch (err) {
+    setMessage(`Couldn't save ${baseName(workspace.file)}: ${err instanceof Error ? err.message : err}`);
+  }
+}
+function afterWorkspaceChange() {
+  saveWorkspacePref();
+  watchWorkspace();
+  renderTree();
+  void writeWorkspaceFile();
+  void titleWindow(workspaceName(), fs.desktop, nightlyWeb);
+}
+
+/** Adds a folder to this window's workspace. With nothing open, it just opens it. */
+async function addFolderToWorkspace() {
+  if (!fs.available) return setMessage("Opening folders needs the desktop app.");
+  try {
+    const root = await fs.pickFolder();
+    if (!root) return;
+    if (!project) return void (await loadProject(root));
+    if (workspace.folders.some((f) => samePath(f) === samePath(root)))
+      return setMessage(`${baseName(root)} is already in this workspace.`);
+    dirCache.set(root, await fs.readDir(root));
+    workspace.folders.push(root);
+    showPane("files");
+    afterWorkspaceChange();
+    setMessage(`Added ${baseName(root)} to the workspace. ${project.name} stays the active folder until you open a file in another.`);
+  } catch (err) {
+    setMessage(`Could not add the folder: ${err instanceof Error ? err.message : err}`);
+  }
+}
+
+/** Takes a folder out of the workspace (nothing on disk changes). Its open tabs stay open. */
+async function removeFromWorkspace(root: string) {
+  workspace.folders = workspace.folders.filter((f) => samePath(f) !== samePath(root));
+  foldedFolders.delete(root);
+  for (const dir of [...dirCache.keys()])
+    if (folderOf(dir) === null) {
+      dirCache.delete(dir);
+      expanded.delete(dir);
+    }
+  if (!workspace.folders.length) {
+    workspace.file = null;
+    closeFolder();
+    return;
+  }
+  if (project && samePath(project.root) === samePath(root)) await useFolder(workspace.folders[0]);
+  afterWorkspaceChange();
+  setMessage(`Removed ${baseName(root)} from the workspace.`);
+}
+
+/** Closes every folder in this window: tabs stay open, but nothing builds or shows in the Explorer. */
+function closeFolder() {
+  project = null;
+  workspace = { file: null, folders: [] };
+  dirCache.clear();
+  expanded.clear();
+  foldedFolders.clear();
+  targetDir = null;
+  creating = null;
+  try {
+    localStorage.removeItem(PROJECT_PREF);
+  } catch {
+    /* storage unavailable */
+  }
+  saveWorkspacePref();
+  watchWorkspace();
+  void loadConfig(false);
+  renderTree();
+  applyEditorMode();
+  void scm.refresh();
+  emit("project", { root: null, name: null });
+  void titleWindow(null, fs.desktop, nightlyWeb);
+  setMessage("Closed the folder");
+}
+
+/** Saves this window's folders as a .tide-workspace file, to open again together. */
+async function saveWorkspaceAs() {
+  if (!workspace.folders.length) return setMessage("Open a folder first.");
+  const name = workspace.file ? baseName(workspace.file) : `${project?.name ?? "TIde"}.${WORKSPACE_EXT}`;
+  const path = await fs.pickSaveFile(name, { name: "TIde workspace", extensions: [WORKSPACE_EXT] });
+  if (!path) return;
+  workspace.file = /\.tide-workspace$/i.test(path) ? path : `${path}.${WORKSPACE_EXT}`;
+  await writeWorkspaceFile();
+  saveWorkspacePref();
+  void titleWindow(workspaceName(), fs.desktop, nightlyWeb);
+  renderTree();
+  setMessage(`Saved the workspace as ${baseName(workspace.file)}`);
+}
+
+/** Opens a .tide-workspace file: its folders, in place of what this window had open. */
+async function openWorkspace(file?: string) {
+  if (!fs.desktop) return setMessage("Workspace files need the desktop app.");
+  try {
+    const path = file ?? (await fs.pickFile("TIde workspace", [WORKSPACE_EXT]));
+    if (!path) return;
+    const data = JSON.parse(await fs.readFile(path)) as { folders?: { path?: unknown }[] };
+    const dir = parentOf(path);
+    const wanted = (Array.isArray(data.folders) ? data.folders : [])
+      .map((f) => (typeof f?.path === "string" ? f.path : ""))
+      .filter(Boolean)
+      .map((f) => (isAbsolute(f) ? f : joinPath(dir, f)));
+    const folders: string[] = [];
+    const missing: string[] = [];
+    dirCache.clear();
+    expanded.clear();
+    foldedFolders.clear();
+    for (const f of wanted) {
+      try {
+        dirCache.set(f, await fs.readDir(f));
+        folders.push(f);
+      } catch {
+        missing.push(baseName(f));
+      }
+    }
+    if (!folders.length) return setMessage(`${baseName(path)} has no folders TIde can open${missing.length ? ` (${missing.join(", ")} can't be found)` : ""}.`);
+    workspace = { file: path, folders };
+    await useFolder(folders[0], true);
+    renderTree();
+    if (missing.length) setMessage(`Opened ${baseName(path)}, without ${missing.join(", ")}: not found.`);
+  } catch (err) {
+    setMessage(`Could not open the workspace: ${err instanceof Error ? err.message : err}`);
+  }
+}
+
+/** Re-reads every folder the Explorer shows. */
+const refreshWorkspace = () => void foldersChanged([...dirCache.keys()]);
 
 // ── Live folders: the Explorer re-reads a folder when anything changes in it ──
 const samePath = (p: string) =>
@@ -2964,9 +3225,10 @@ if (fs.web) {
 }
 
 if (fs.desktop) {
-  import("@tauri-apps/api/event")
-    .then(({ listen }) =>
-      listen<{ dirs: string[] }>(
+  // This window's folders only: each window watches its own (watch.rs).
+  import("@tauri-apps/api/webviewWindow")
+    .then(({ getCurrentWebviewWindow }) =>
+      getCurrentWebviewWindow().listen<{ dirs: string[] }>(
         "folder://changed",
         (e) => void foldersChanged(e.payload.dirs),
       ),
@@ -2986,6 +3248,22 @@ async function openBrowserProject() {
       `Could not open the project: ${err instanceof Error ? err.message : err}`,
     );
   }
+}
+
+/** Opens another TIde window (desktop app): empty, or with a folder or workspace. */
+async function newWindow(start?: WindowStart) {
+  if (!fs.desktop) return setMessage("More windows need the desktop app. In the browser, open TIde in another tab.");
+  try {
+    await openWindow(start);
+  } catch (err) {
+    setMessage(`Could not open a window: ${err instanceof Error ? err.message : err}`);
+  }
+}
+/** Picks a folder and opens it in a new window. */
+async function openFolderInNewWindow() {
+  if (!fs.desktop) return setMessage("More windows need the desktop app.");
+  const root = await fs.pickFolder();
+  if (root) await newWindow({ folder: root });
 }
 
 async function openFolder() {
@@ -3128,11 +3406,50 @@ function treeRows(path: string, depth: number, out: HTMLElement[]) {
 function renderTree() {
   $("new-file").hidden = $("new-folder").hidden = !project;
   els.openFolder.hidden = !!project;
-  els.projectName.textContent = project?.name ?? "No folder open";
-  els.projectName.title = project?.root ?? "";
+  const several = workspace.folders.length > 1;
+  els.projectName.textContent = several
+    ? (workspace.file ? baseName(workspace.file).replace(/\.tide-workspace$/i, "") : "Workspace")
+    : (project?.name ?? "No folder open");
+  els.projectName.title = several
+    ? `${workspace.file ?? "A workspace of these folders"}\n${workspace.folders.join("\n")}`
+    : (project?.root ?? "");
   els.treeEmpty.hidden = project !== null;
   const rows: HTMLElement[] = [];
-  if (project) treeRows(project.root, 0, rows);
+  if (several)
+    for (const root of workspace.folders) {
+      const open = !foldedFolders.has(root);
+      const isActive = !!project && samePath(project.root) === samePath(root);
+      const row = h(
+        "li",
+        {
+          role: "treeitem",
+          tabIndex: 0,
+          className: `ws-folder${isActive ? " active" : ""}`,
+          title: `${root}${isActive ? "\nThe active folder: builds, Source Control and tide.json follow it" : ""}`,
+        },
+        h("span", { className: "twisty" }, open ? "▾" : "▸"),
+        h("span", { className: "name" }, baseName(root)),
+        ...(isActive ? [h("span", { className: "ws-active" }, "active")] : []),
+      );
+      row.dataset.wsFolder = root;
+      row.setAttribute("aria-expanded", String(open));
+      const fold = () => {
+        if (open) foldedFolders.add(root);
+        else foldedFolders.delete(root);
+        targetDir = root;
+        renderTree();
+      };
+      row.onclick = fold;
+      row.onkeydown = (e) => {
+        if (e.key === "Enter" || e.key === " ") {
+          e.preventDefault();
+          fold();
+        }
+      };
+      rows.push(row);
+      if (open) treeRows(root, 1, rows);
+    }
+  else if (project) treeRows(project.root, 0, rows);
   const typing =
     !!creating?.row && creating.row.contains(document.activeElement);
   els.tree.replaceChildren(...rows);
@@ -3378,6 +3695,38 @@ function showPane(which: Pane, toggle = false) {
     $(`pane-${k}`).hidden = k !== which;
   }
   if (which === "scm" && !hide) void scm.refresh();
+}
+
+// ── The side bar's width: drag its right edge (double-click for the default), remembered ──
+const SIDE_WIDTH_PREF = "tide-pref-side-width"; // not "tide:", which the browser store treats as a program
+const SIDE_DEFAULT = 230;
+let sideWidth = SIDE_DEFAULT;
+try { sideWidth = Number(localStorage.getItem(SIDE_WIDTH_PREF)) || SIDE_DEFAULT; } catch { /* storage unavailable */ }
+/** Fits the chosen width to the window, so a narrow window keeps room for the editor without forgetting it. */
+const fitSide = () => {
+  const w = Math.max(160, Math.min(sideWidth, 640, window.innerWidth - 360));
+  app.style.setProperty("--side-w", `${Math.round(w)}px`);
+};
+const saveSide = () => { try { localStorage.setItem(SIDE_WIDTH_PREF, String(sideWidth)); } catch { /* storage unavailable */ } };
+fitSide();
+window.addEventListener("resize", fitSide);
+{
+  const sash = $("side-resize");
+  sash.addEventListener("pointerdown", e => {
+    e.preventDefault();
+    const startX = e.clientX, startW = $("pane-files").parentElement!.getBoundingClientRect().width;
+    app.classList.add("resizing-side");
+    const move = (m: PointerEvent) => { sideWidth = Math.max(160, startW + m.clientX - startX); fitSide(); };
+    const up = () => {
+      window.removeEventListener("pointermove", move);
+      window.removeEventListener("pointerup", up);
+      app.classList.remove("resizing-side");
+      saveSide();
+    };
+    window.addEventListener("pointermove", move);
+    window.addEventListener("pointerup", up);
+  });
+  sash.addEventListener("dblclick", () => { sideWidth = SIDE_DEFAULT; fitSide(); saveSide(); });
 }
 
 /** TI-BASIC gets the calculator's ":" gutter, the 26-column ruler and its own completions; other languages get a normal editor. */
@@ -4138,7 +4487,7 @@ function folderItems(path: string, isRoot: boolean): MenuItem[] {
     "-",
     {
       label: "Refresh",
-      run: () => void (project && loadProject(project.root, false)),
+      run: refreshWorkspace,
     },
     ...(isRoot ? [] : ["-" as const, ...deleteItems(path, true)]),
     ...(isRoot
@@ -4160,6 +4509,25 @@ function folderItems(path: string, isRoot: boolean): MenuItem[] {
 
 /** What the menu offers depends on what was right-clicked. */
 function menuFor(target: HTMLElement): MenuItem[] | null {
+  const wsFolder = target.closest<HTMLElement>("[data-ws-folder]")?.dataset.wsFolder;
+  if (wsFolder) {
+    const isActive = !!project && samePath(project.root) === samePath(wsFolder);
+    return [
+      {
+        label: "Make active folder",
+        disabled: isActive,
+        run: () => void useFolder(wsFolder),
+      },
+      ...(fs.desktop
+        ? [{ label: "Open in new window", run: () => void newWindow({ folder: wsFolder }) }]
+        : []),
+      { label: "Remove from workspace", run: () => void removeFromWorkspace(wsFolder) },
+      "-",
+      ...folderItems(wsFolder, true).filter(
+        (i) => i === "-" || !/^(Project settings|Open another folder)/.test(i.label),
+      ),
+    ];
+  }
   const program =
     target.closest<HTMLElement>("[data-program]")?.dataset.program;
   if (program) {
@@ -4476,11 +4844,22 @@ $("new-folder").addEventListener(
   "click",
   () => void (project && createIn(targetDir ?? project.root, "folder")),
 );
-// The File menu: programs, files, folders, saving, building and settings in one place.
-$("file-menu").addEventListener("click", (e) => {
-  const r = (e.currentTarget as HTMLElement).getBoundingClientRect();
+// ── The menu bar: File, Edit, View, Run, Calculator and Help across the top ──
+/** Opens a web page in your browser. */
+const openLink = (url: string) => {
+  if (fs.desktop) void import("@tauri-apps/plugin-opener").then((o) => o.openUrl(url));
+  else window.open(url, "_blank", "noopener");
+};
+const REPO = "https://github.com/XSamuraiCoder/TIde";
+/** Runs one of the editor's own commands on the open file. */
+const editorDoes = (command: string) => () => {
+  editor.focus();
+  editor.trigger("menu", command, null);
+};
+
+function fileMenu(): MenuItem[] {
   const doc = activeDoc();
-  showMenu(r.left, r.bottom + 2, [
+  return [
     {
       label: "New program…",
       shortcut: "Ctrl+N",
@@ -4500,12 +4879,21 @@ $("file-menu").addEventListener("click", (e) => {
       run: () =>
         void (project && createIn(targetDir ?? project.root, "folder")),
     },
+    ...(fs.desktop
+      ? [
+          "-" as const,
+          { label: "New window", shortcut: "Ctrl+Shift+N", run: () => void newWindow() },
+        ]
+      : []),
     "-",
     {
       label: "Open folder…",
       shortcut: "Ctrl+Shift+O",
       run: () => void openFolder(),
     },
+    ...(fs.desktop
+      ? [{ label: "Open folder in new window…", run: () => void openFolderInNewWindow() }]
+      : []),
     ...(fs.web
       ? [
           {
@@ -4514,20 +4902,35 @@ $("file-menu").addEventListener("click", (e) => {
           },
         ]
       : []),
+    "-",
     {
-      label: "Send files to calculator…",
-      run: () => {
-        void calc.show().then(() => $("calc-send").click());
-      },
+      label: "Add folder to workspace…",
+      disabled: !fs.available,
+      run: () => void addFolderToWorkspace(),
     },
-    { label: "Connect a calculator…", run: () => void calc.connectReal() },
-    { label: "Serial cable…", run: () => openSerialTab() },
+    ...(fs.desktop
+      ? [
+          { label: "Open workspace…", run: () => void openWorkspace() },
+          {
+            label: workspace.file ? "Save workspace as…" : "Save workspace…",
+            disabled: !workspace.folders.length,
+            run: () => void saveWorkspaceAs(),
+          },
+        ]
+      : []),
     "-",
     {
       label: "Save",
       shortcut: "Ctrl+S",
       disabled: !doc,
       run: () => void saveActive(),
+    },
+    {
+      label: "Save all",
+      disabled: ![...docs.values()].some(isDirty),
+      run: () => {
+        for (const d of docs.values()) if (isDirty(d)) void saveDoc(d);
+      },
     },
     {
       label: "Reload from disk",
@@ -4542,13 +4945,6 @@ $("file-menu").addEventListener("click", (e) => {
         )
           return;
         void reloadFromDisk(doc, true);
-      },
-    },
-    {
-      label: "Save all",
-      disabled: ![...docs.values()].some(isDirty),
-      run: () => {
-        for (const d of docs.values()) if (isDirty(d)) void saveDoc(d);
       },
     },
     {
@@ -4570,6 +4966,111 @@ $("file-menu").addEventListener("click", (e) => {
     },
     "-",
     {
+      label: "Project settings (.tide/tide.json)",
+      disabled: !project,
+      run: () => void openProjectFile(),
+    },
+    { label: "Settings", shortcut: "Ctrl+,", run: openSettings },
+    "-",
+    {
+      label: "Close tab",
+      shortcut: "Ctrl+W",
+      disabled: !active,
+      run: () => {
+        if (active) closeTab(active);
+      },
+    },
+    {
+      label: "Close all tabs",
+      disabled: !tabOrder.length,
+      run: () => {
+        for (const id of [...tabOrder]) closeTab(id);
+      },
+    },
+    {
+      label: workspace.folders.length > 1 ? "Close workspace" : "Close folder",
+      disabled: !project,
+      run: closeFolder,
+    },
+  ];
+}
+
+function editMenu(): MenuItem[] {
+  const none = !activeDoc() || active === CALC_TAB;
+  return [
+    { label: "Undo", shortcut: "Ctrl+Z", disabled: none, run: editorDoes("undo") },
+    { label: "Redo", shortcut: "Ctrl+Y", disabled: none, run: editorDoes("redo") },
+    "-",
+    { label: "Cut", shortcut: "Ctrl+X", disabled: none, run: editorDoes("editor.action.clipboardCutAction") },
+    { label: "Copy", shortcut: "Ctrl+C", disabled: none, run: editorDoes("editor.action.clipboardCopyAction") },
+    {
+      label: "Paste",
+      shortcut: "Ctrl+V",
+      disabled: none,
+      // The editor's own paste needs the keyboard; from a menu, the clipboard is read and typed in.
+      run: () =>
+        void navigator.clipboard
+          .readText()
+          .then((text) => {
+            editor.focus();
+            editor.trigger("menu", "type", { text });
+          })
+          .catch(() => setMessage("TIde can't read the clipboard from the menu here: press Ctrl+V.")),
+    },
+    "-",
+    { label: "Find", shortcut: "Ctrl+F", disabled: none, run: editorDoes("actions.find") },
+    { label: "Replace", shortcut: "Ctrl+H", disabled: none, run: editorDoes("editor.action.startFindReplaceAction") },
+    { label: "Go to line…", shortcut: "Ctrl+G", disabled: none, run: editorDoes("editor.action.gotoLine") },
+    "-",
+    { label: "Select all", shortcut: "Ctrl+A", disabled: none, run: editorDoes("editor.action.selectAll") },
+    { label: "Toggle comment", shortcut: "Ctrl+/", disabled: none, run: editorDoes("editor.action.commentLine") },
+    "-",
+    { label: "Command palette…", shortcut: "F1", disabled: none, run: editorDoes("editor.action.quickCommand") },
+  ];
+}
+
+function viewMenu(): MenuItem[] {
+  const s = settings();
+  const sideShown = !app.classList.contains("no-side");
+  return [
+    { label: "Explorer", run: () => showPane("files") },
+    ...(fs.desktop ? [{ label: "Source Control", shortcut: "Ctrl+Shift+G", run: () => showPane("scm") }] : []),
+    { label: "Docs", shortcut: "Ctrl+Shift+J", run: () => showPane("docs") },
+    { label: "Extensions", shortcut: "Ctrl+Shift+X", run: () => showPane("ext") },
+    { label: "Side bar", shortcut: "Ctrl+B", checked: sideShown, run: () => showPane(pane, true) },
+    "-",
+    ...(fs.desktop
+      ? [{ label: "Terminal", shortcut: "Ctrl+`", run: () => panel.show("terminal", true) }]
+      : []),
+    {
+      label: "Output",
+      shortcut: "Ctrl+Shift+U",
+      run: () => panel.show("output"),
+    },
+    "-",
+    { label: "Word wrap", checked: s.wordWrap, run: () => setSetting("wordWrap", !s.wordWrap) },
+    { label: "Minimap", checked: s.minimap, run: () => setSetting("minimap", !s.minimap) },
+    { label: "Line numbers", checked: showNumbers, run: () => setGutter(!showNumbers) },
+    "-",
+    {
+      label: "Light mode",
+      checked: isLight(),
+      run: () => {
+        setSetting("theme", isLight() ? "dark" : "light");
+        if (projectSettings().theme)
+          setMessage(
+            `This project's tide.json sets the ${projectSettings().theme} theme, which wins while it's open.`,
+          );
+      },
+    },
+  ];
+}
+
+function runMenu(): MenuItem[] {
+  const doc = activeDoc();
+  const extra = extensionItems();
+  return [
+    {
       label: buildLabel(),
       shortcut: "Ctrl+E",
       disabled: els.exportBtn.hidden,
@@ -4590,63 +5091,94 @@ $("file-menu").addEventListener("click", (e) => {
       disabled: els.run.hidden,
       run: () => void runInEmulator(),
     },
-    "-",
+    // tide.json's scripts, as the status bar's list has them.
+    ...[...els.scripts.options]
+      .filter((o) => o.value)
+      .map((o, i) => ({ label: `Script: ${o.textContent ?? o.value}`, run: () => void runScript(o.value), first: i === 0 }))
+      .flatMap(({ first, ...item }) => (first ? ["-" as const, item] : [item])),
+    ...(extra.length ? ["-" as const, ...extra] : []),
+  ];
+}
+
+function calculatorMenu(): MenuItem[] {
+  return [
+    { label: "Show calculator", run: () => void calc.show() },
     {
-      label: "Project settings (.tide/tide.json)",
-      disabled: !project,
-      run: () => void openProjectFile(),
-    },
-    {
-      label: "Light mode",
-      checked: isLight(),
+      label: "Send files to calculator…",
       run: () => {
-        setSetting("theme", isLight() ? "dark" : "light");
-        if (projectSettings().theme)
-          setMessage(
-            `This project's tide.json sets the ${projectSettings().theme} theme, which wins while it's open.`,
-          );
+        void calc.show().then(() => $("calc-send").click());
       },
     },
-    { label: "Settings", shortcut: "Ctrl+,", run: openSettings },
-    {
-      label: "Extensions",
-      shortcut: "Ctrl+Shift+X",
-      run: () => showPane("ext"),
-    },
+    "-",
+    { label: "Connect a calculator…", run: () => void calc.connectReal() },
+    { label: "Serial cable…", run: () => openSerialTab() },
+  ];
+}
+
+function helpMenu(): MenuItem[] {
+  return [
+    { label: "Docs for this language", shortcut: "Ctrl+Shift+J", run: () => openDocs() },
+    { label: "Writing extensions", run: () => openLink("https://xsamuraicoder.github.io/TIde/docs/") },
+    "-",
+    { label: "Release notes", run: () => openLink(`${REPO}/releases`) },
+    { label: "Report a problem…", run: () => openLink(`${REPO}/issues/new`) },
     ...(fs.desktop
       ? [
-          {
-            label: "Terminal",
-            shortcut: "Ctrl+`",
-            run: () => panel.show("terminal", true),
-          },
+          "-" as const,
+          { label: "Check for updates…", run: () => $("version").click() },
         ]
       : []),
-    {
-      label: "Output",
-      shortcut: "Ctrl+Shift+U",
-      run: () => panel.show("output"),
-    },
-    "-",
-    ...extensionItems(),
-    "-",
-    {
-      label: "Close tab",
-      shortcut: "Ctrl+W",
-      disabled: !active,
-      run: () => {
-        if (active) closeTab(active);
-      },
-    },
-    {
-      label: "Close all tabs",
-      disabled: !tabOrder.length,
-      run: () => {
-        for (const id of [...tabOrder]) closeTab(id);
-      },
-    },
-  ]);
-});
+  ];
+}
+
+/** The menu bar: a click opens a menu, hovering another name while one is open switches to it, and
+ * the arrow keys move between them. */
+function setUpMenubar() {
+  const menus: [label: string, items: () => MenuItem[]][] = [
+    ["File", fileMenu],
+    ["Edit", editMenu],
+    ["View", viewMenu],
+    ["Run", runMenu],
+    ["Calculator", calculatorMenu],
+    ["Help", helpMenu],
+  ];
+  const bar = $("menubar");
+  let openAt = -1;
+  let closedAt = { index: -1, time: 0 };
+  const buttons = menus.map(([label], i) => {
+    const b = h("button", { type: "button", className: "menubar-item", role: "menuitem" }, label);
+    b.setAttribute("aria-haspopup", "menu");
+    b.setAttribute("aria-expanded", "false");
+    b.addEventListener("click", () => {
+      // The click that closed this menu (on pointerdown) doesn't open it again.
+      if (closedAt.index === i && performance.now() - closedAt.time < 400) return;
+      show(i);
+    });
+    b.addEventListener("pointerenter", () => {
+      if (openAt !== -1 && openAt !== i && menuIsOpen()) show(i);
+    });
+    return b;
+  });
+  bar.prepend(...buttons);
+  function show(i: number) {
+    const r = buttons[i].getBoundingClientRect();
+    if (openAt !== -1) buttons[openAt].setAttribute("aria-expanded", "false");
+    openAt = -1; // showMenu closes the one open first, which mustn't count as this one closing
+    showMenu(r.left, r.bottom, menus[i][1](), () => {
+      buttons[i].setAttribute("aria-expanded", "false");
+      closedAt = { index: i, time: performance.now() };
+      if (openAt === i) openAt = -1;
+    });
+    openAt = i;
+    buttons[i].setAttribute("aria-expanded", "true");
+  }
+  document.addEventListener("keydown", (e) => {
+    if (openAt === -1 || !menuIsOpen() || (e.key !== "ArrowLeft" && e.key !== "ArrowRight")) return;
+    e.preventDefault();
+    show((openAt + (e.key === "ArrowRight" ? 1 : menus.length - 1)) % menus.length);
+  }, true);
+}
+setUpMenubar();
 els.gutter.addEventListener("click", () => setGutter(!showNumbers));
 els.encoding.addEventListener("change", () => {
   const [action, key] = els.encoding.value.split(":");
@@ -4667,7 +5199,9 @@ onSettingsChange((s) => {
     wordWrap: s.wordWrap ? "on" : "off",
     minimap: { enabled: s.minimap },
     renderWhitespace: s.renderWhitespace,
+    fontLigatures: s.fontLigatures,
   });
+  void applyFonts(s, editor);
   for (const doc of docs.values())
     applyIndentation(doc.model, doc.label, doc.language, s.tabSize);
   applyEditorMode();
@@ -4701,6 +5235,9 @@ window.addEventListener("keydown", (e) => {
   if (e.shiftKey && key === "o") {
     e.preventDefault();
     void openFolder();
+  } else if (e.shiftKey && key === "n" && fs.desktop) {
+    e.preventDefault();
+    void newWindow();
   } else if (e.shiftKey && key === "e") {
     e.preventDefault();
     void exportActive(true);
@@ -4765,9 +5302,7 @@ if (fs.web) {
   for (const id of ["calc-cemu", "act-scm", "panel-tab-terminal", "status-terminal", "panel-new-terminal"])
     $(id).hidden = true;
   // The nightly web version, built from every push to main at /TIde/nightly/, says so in its tab.
-  const nightly = import.meta.env.BASE_URL.endsWith("/nightly/");
-  if (nightly) document.title = "TIde Nightly";
-  setUpInstall(nightly);
+  setUpInstall(nightlyWeb);
 }
 
 /**
@@ -4782,7 +5317,7 @@ function setUpInstall(nightly: boolean) {
   const name = nightly ? "TIde Nightly" : "TIde";
   const button = h("button", { type: "button", id: "install-app", className: "install-app", title: `Install ${name}` },
     h("span", { ariaHidden: "true" }, "⤓"), "Install");
-  document.querySelector(".workspace")?.append(button);
+  $("menubar").append(button); // at the menu bar's right end
   const installed = () => matchMedia("(display-mode: standalone)").matches || matchMedia("(display-mode: window-controls-overlay)").matches;
   button.hidden = installed();
   window.addEventListener("beforeinstallprompt", (e) => {
@@ -4971,17 +5506,45 @@ if (fs.desktop)
       /* stays "dev" */
     });
 
-// Reopen the last project folder, quietly: if it moved or was deleted, just start empty.
-if (fs.available) {
-  let last: string | null = null;
+// What this window opens: what another window asked for (windows.ts), or else what was open last,
+// quietly: a folder that moved or was deleted is left out, and with none left TIde starts empty.
+void titleWindow(null, fs.desktop, nightlyWeb);
+const start = windowStart();
+if (start?.folder) void loadProject(start.folder, false).catch((err) => setMessage(`Could not open ${baseName(start.folder!)}: ${err}`));
+else if (start?.workspace) void openWorkspace(start.workspace);
+else if (!start?.empty && fs.available) void reopenLast();
+
+async function reopenLast() {
+  let last: { file: string | null; folders: string[]; active: string | null } | null = null;
+  let lastFolder: string | null = null;
   try {
-    last = localStorage.getItem(PROJECT_PREF);
+    last = JSON.parse(localStorage.getItem(WORKSPACE_PREF) ?? "null");
+    lastFolder = localStorage.getItem(PROJECT_PREF);
   } catch {
     /* storage unavailable */
   }
-  if (last)
-    loadProject(last, false).catch(() => {
-      project = null;
-      renderTree();
-    });
+  if (last?.file && fs.desktop) return openWorkspace(last.file);
+  const folders = last && Array.isArray(last.folders) && last.folders.length > 1 ? last.folders : null;
+  if (!folders) {
+    if (lastFolder)
+      await loadProject(lastFolder, false).catch(() => {
+        project = null;
+        renderTree();
+      });
+    return;
+  }
+  const opened: string[] = [];
+  for (const f of folders) {
+    try {
+      dirCache.set(f, await fs.readDir(f));
+      opened.push(f);
+    } catch {
+      /* moved or deleted */
+    }
+  }
+  if (!opened.length) return;
+  workspace = { file: null, folders: opened };
+  const active = opened.find((f) => last!.active && samePath(f) === samePath(last!.active)) ?? opened[0];
+  await useFolder(active).catch(() => undefined);
+  renderTree();
 }

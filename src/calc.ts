@@ -2562,7 +2562,7 @@ export function createCalc(opts: {
       if (cfg?.via && choice !== "real") void choose("real");
     },
     async connectReal() {
-      // From anywhere (the Serial tab, the File menu): the calculator becomes the real one, without
+      // From anywhere (the Serial tab, the Calculator menu): the calculator becomes the real one, without
       // leaving the tab you're on.
       if (choice !== "real") {
         await stop();

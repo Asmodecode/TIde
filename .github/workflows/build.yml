@@ -2,7 +2,7 @@ name: Build
 
 # Three kinds of release:
 # - every push to main refreshes the rolling "latest" prerelease: a nightly build, versioned as the
-#   next patch with the run number (2.0.1-75: above 2.0.0, below 2.0.1), with nightly.json, which
+#   next minor release with the run number (2.2.0-75: above 2.1.x, below 2.2.0), with nightly.json, which
 #   installed apps on the Nightly update channel read (releases/download/latest/nightly.json);
 # - a version tag (v1.5.0) builds that version as a stable release, with latest.json, which installed
 #   apps on the Stable channel read: releases/latest/download/latest.json, the newest stable release.
@@ -75,10 +75,10 @@ jobs:
                 --title "TIde $tag" --notes "Building TIde $version…"
             fi
           else
-            # A nightly: the next patch version, with this run's number after it. Windows' MSI takes
-            # only a number there, of at most 65535.
+            # A nightly: the next minor version, with this run's number after it (2.1.1 → 2.2.0-75).
+            # Windows' MSI takes only a number there, of at most 65535.
             IFS=. read -r major minor patch <<< "${version%%-*}"
-            version="$major.$minor.$((patch + 1))-$GITHUB_RUN_NUMBER"
+            version="$major.$((minor + 1)).0-$GITHUB_RUN_NUMBER"
             echo "version=$version" >> "$GITHUB_OUTPUT"
             echo "release=latest" >> "$GITHUB_OUTPUT"
             echo "stable=false" >> "$GITHUB_OUTPUT"
@@ -172,7 +172,7 @@ jobs:
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         with:
-          # A nightly's version has a dash (2.0.2-48), which an .rpm can't have: Linux nightlies are the
+          # A nightly's version has a dash (2.2.0-48), which an .rpm can't have: Linux nightlies are the
           # .deb and the AppImage (what the Nightly channel updates from). Releases build all three.
           args: ${{ matrix.args }} --config src-tauri/tauri.ci.conf.json ${{ needs.prepare.outputs.stable != 'true' && runner.os == 'Linux' && '--bundles deb,appimage' || '' }}
 

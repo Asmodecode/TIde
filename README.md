@@ -105,6 +105,14 @@ The desktop app checks the newest stable release (the latest `v` tag's) when it 
 
 **Settings → Updates → Update channel** picks which builds the app updates to: **Stable**, each tagged release, or **Nightly**, every build of `main`, with the newest changes before they're released. Every push to `main` refreshes the rolling `latest` prerelease as a nightly: it's versioned as the next patch with the build's run number (`2.0.1-75`, above 2.0.0 and below 2.0.1), and its `nightly.json` is what the Nightly channel reads. Going back to Stable keeps the nightly until the next release is newer. Pushing a version tag (`git tag v1.5.0 && git push origin v1.5.0`) builds that version as a stable release with `latest.json`, and installed apps update to it. Releases use the version in `src-tauri/tauri.conf.json`, and the tag must match it (also set it in `package.json` and `Cargo.toml`); installed apps are offered an update only when it goes up, so bump it to ship one. Update files are signed. The workflow needs the signing key as the `TAURI_SIGNING_PRIVATE_KEY` repository secret (and `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` if the key has one). The public key is in `tauri.conf.json`.
 
+## Menus, windows and workspaces
+
+The menu bar across the top has **File** (new programs, files and windows; opening folders and workspaces; saving; settings), **Edit** (undo, the clipboard, find and replace, go to line, comments, the command palette), **View** (the side bar's views, the terminal and output, word wrap, the minimap, line numbers, light mode), **Run** (build, run, the project's `tide.json` scripts and extensions' commands), **Calculator** (show it, send files, connect a calculator or a serial cable) and **Help**. Click a name to open its menu; hover another, or use ← and →, to move between them.
+
+In the desktop app, **File → New window** (`Ctrl+Shift+N`) opens another window, and **Open folder in new window…** opens a project in one, so you can work on several at once. Each window has its own folder, tabs, terminal and Source Control; settings are shared. TIde reopens what the first window had open last.
+
+A **workspace** is several folders in one window: **File → Add folder to workspace…** adds one, and each shows as a heading in the Explorer. The folder of the file you're in is the active one, marked **active**: builds, Source Control, the terminal and its `tide.json` follow it, and right-clicking a folder's heading can make it the active one, open it in a new window or remove it from the workspace. **Save workspace…** keeps the folders in a `.tide-workspace` file (folders beside or below it are saved relative to it), and **Open workspace…** opens one again.
+
 ## Files and settings
 
 Project files open in the encoding they're in: UTF-8, UTF-16 (from its byte-order mark), or, for other text, the encoding set in Settings (Windows 1252 to start with). The status bar shows a file's encoding; pick one there to reopen the file in it or save it in it. TIde reads over 25 encodings and saves all but the multi-byte East Asian ones. A binary file opens in a tab that says so, with a hex preview and an option to open it as text anyway.
@@ -113,7 +121,7 @@ Images (PNG, JPEG, GIF, BMP, WebP, AVIF, ICO and SVG) open as pictures in the ed
 
 TI files (`.8xp`, `.8xv`, `.8xg`, `.8ek`, `.b84` and the rest) open as a summary: the comment, each variable's name, type, size, archive flag and version, and whether the checksum is valid. Programs show their TI-BASIC, with **Open as program** to copy one into your programs; Flash apps and OS files show their header, and bundles list their contents. **Send to calculator** sends the file.
 
-**Settings** (the gear at the bottom of the activity bar, or `Ctrl+,`) covers the look (dark, light or the system's), the editor (font size, tab size, word wrap, minimap, whitespace), TI-BASIC (calculator, gutter, screen-width ruler), the encoding for other text, `clibs.8xg`, the TI-Nspire (Ndless SDK folder, Luna command), files (auto save), the project (when to set up a folder, and its `tide.json`), source control and update checks.
+**Settings** (the gear at the bottom of the activity bar, or `Ctrl+,`) covers the theme (TIde Dark and Light; Dark Modern, Light Modern and Monokai, modeled on VS Code's; High Contrast Dark and Light; Graphite and LCD; any an extension adds; or the system's), the font (the default Inter and JetBrains Mono pair; JetBrains Mono, Fira Code, Source Code Pro, Roboto Mono, IBM Plex Mono, Inter, IBM Plex Sans or Source Sans 3 throughout, all bundled; the system's; or a .ttf, .otf, .woff or .woff2 file; and ligatures), the editor (font size, tab size, word wrap, minimap, whitespace), TI-BASIC (calculator, gutter, screen-width ruler), the encoding for other text, `clibs.8xg`, the TI-Nspire (Ndless SDK folder, Luna command), files (auto save), the project (when to set up a folder, and its `tide.json`), source control and update checks.
 
 ## Output, Terminal and Console
 
@@ -159,7 +167,7 @@ An extension is a folder in TIde's extensions folder (**More ▾ → Open extens
 }
 ```
 
-`main.js` exports `activate(tide)` (and optionally `deactivate()`). `tide` has `commands.register(id, label, run)` (commands go in the File menu and the editor's right-click menu), `languages.completions`, `hover`, `signatureHelp` and `markers` for IntelliSense in any language, `languages.builtIn("tibasic" | "c" | "ez80" | "python")` to turn on TIde's own IntelliSense for one (as CE Languages does), `on("open" | "save" | "run" | "project" | "settings", fn)`, `editor` (the open file's text and selection), `calculator.macro(…)`, `files`, `message`, `settings`, `project`, and `monaco` for anything else. Everything it registers is undone when the extension is turned off.
+`main.js` exports `activate(tide)` (and optionally `deactivate()`). `tide` has `commands.register(id, label, run)` (commands go in the Run menu and the editor's right-click menu), `languages.completions`, `hover`, `signatureHelp` and `markers` for IntelliSense in any language, `languages.builtIn("tibasic" | "c" | "ez80" | "python")` to turn on TIde's own IntelliSense for one (as CE Languages does), `on("open" | "save" | "run" | "project" | "settings", fn)`, `editor` (the open file's text and selection), `calculator.macro(…)`, `files`, `message`, `settings`, `project`, and `monaco` for anything else. Everything it registers is undone when the extension is turned off.
 
 ### .TIdeex files
 
@@ -195,6 +203,7 @@ Use Cmd instead of Ctrl on macOS.
 | `Ctrl+Shift+U` | Output |
 | `Ctrl+N` | Find or create a program |
 | `Ctrl+Shift+O` | Open a folder |
+| `Ctrl+Shift+N` | New window (desktop app) |
 | `Ctrl+W` | Close the tab |
 
 In the program search, Enter opens the first match or creates the program if nothing matches. `Ctrl+Enter` always creates it.

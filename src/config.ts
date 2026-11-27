@@ -190,6 +190,15 @@ export const CONFIG_SCHEMA = {
           maximum: 28,
           description: "Font size in pixels.",
         },
+        font: {
+          enum: ["default", "jetbrains-mono", "fira-code", "source-code-pro", "roboto-mono", "ibm-plex-mono", "inter", "ibm-plex-sans", "source-sans-3", "system", "file"],
+          description:
+            'TIde\'s font, for the window, the editor and the terminal: "default" (Inter for the window, JetBrains Mono for code), "jetbrains-mono", "fira-code", "source-code-pro", "roboto-mono", "ibm-plex-mono", "inter", "ibm-plex-sans", "source-sans-3" (all come with TIde), "system" (the computer\'s own), or "file" for the font file chosen in Settings.',
+        },
+        fontLigatures: {
+          type: "boolean",
+          description: "Join characters such as -> and != into one symbol, in fonts that have them.",
+        },
         tabSize: {
           enum: [2, 4, 8],
           description: "Spaces per indent in C, Python and other files.",
@@ -218,8 +227,10 @@ export const CONFIG_SCHEMA = {
           description: "Save changed files a moment after you stop typing.",
         },
         theme: {
-          enum: ["dark", "light", "system"],
-          description: "Dark or light mode, or whichever the system uses.",
+          type: "string",
+          examples: ["dark", "light", "dark-modern", "light-modern", "monokai", "high-contrast-dark", "high-contrast-light", "graphite", "lcd", "system"],
+          description:
+            'A theme\'s id: "dark" (TIde Dark), "light" (TIde Light), "dark-modern", "light-modern", "monokai", "high-contrast-dark", "high-contrast-light", "graphite", "lcd", an extension\'s theme, or "system".',
         },
       },
     },

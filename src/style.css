@@ -18,6 +18,7 @@
     --wave-top: #38bdf8;
     --wave-mid: #2563eb;
     --wave-bot: #1e40af;
+    --wave-end: #0284c7; /* where the status bar's gradient ends */
     /* Bundled with TIde (@fontsource-variable, imported in main.ts), so every system shows the same type. */
     --ui: "Inter Variable", system-ui, -apple-system, "Segoe UI", sans-serif;
     --mono: "JetBrains Mono Variable", "Cascadia Code", "SF Mono", Consolas, monospace;
@@ -85,9 +86,6 @@
     --git-r: #0369a1;
     --git-u: #be185d;
 }
-:root[data-theme="light"] .activity button {
-    color: #64748b;
-}
 
 * {
     box-sizing: border-box;
@@ -116,7 +114,7 @@ body {
     --side-w: 230px;
     display: grid;
     grid-template-columns: 44px var(--side-w) minmax(0, 1fr);
-    grid-template-rows: minmax(0, 1fr) 22px;
+    grid-template-rows: 30px minmax(0, 1fr) 22px; /* menu bar, the rest, status bar */
     height: 100%;
 }
 .app.no-side {
@@ -129,15 +127,15 @@ body {
    (auto-placed, it would slide into the side bar's empty column). */
 .app > .activity {
     grid-column: 1;
-    grid-row: 1;
+    grid-row: 2;
 }
 .app > .side {
     grid-column: 2;
-    grid-row: 1;
+    grid-row: 2;
 }
 .app > .workspace {
     grid-column: 3;
-    grid-row: 1;
+    grid-row: 2;
 }
 
 .hint {
@@ -164,14 +162,15 @@ body {
     background: none;
     border: 0;
     border-left: 2px solid transparent;
-    color: #7f8ea8;
+    color: var(--muted);
     cursor: pointer;
 }
+/* The theme's ink, so the hovered and open view stand out on any theme's bar, light ones too. */
 .activity button:hover {
-    color: #e6e8ea;
+    color: var(--ink);
 }
 .activity button[aria-pressed="true"] {
-    color: #fff;
+    color: var(--ink);
     border-left-color: var(--wave-top);
 }
 .activity svg {
@@ -185,13 +184,61 @@ body {
 }
 
 /* Side bar */
+/* The menu bar across the top: File, Edit, View, Run, Calculator, Help (main.ts setUpMenubar) */
+.menubar {
+    grid-column: 1 / -1;
+    grid-row: 1;
+    display: flex;
+    align-items: center;
+    gap: 1px;
+    padding: 0 8px 0 6px;
+    background: var(--navy);
+    border-bottom: 1px solid var(--rule);
+    min-width: 0;
+    overflow: hidden;
+}
+.menubar-item {
+    font: 13px var(--ui);
+    color: var(--muted);
+    background: none;
+    border: 0;
+    border-radius: 4px;
+    padding: 3px 9px;
+    cursor: pointer;
+    flex: none;
+}
+.menubar-item:hover,
+.menubar-item:focus-visible,
+.menubar-item[aria-expanded="true"] {
+    color: var(--ink);
+    background: var(--body);
+}
 .side {
+    position: relative; /* for its resize edge */
     background: var(--panel);
     border-right: 1px solid var(--rule);
     display: flex;
     flex-direction: column;
     min-height: 0;
     min-width: 0;
+}
+.side-resize {
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    right: -3px;
+    width: 6px;
+    cursor: ew-resize;
+    z-index: 3;
+}
+.side-resize:hover,
+.app.resizing-side .side-resize {
+    background: color-mix(in srgb, var(--key) 40%, transparent);
+}
+/* While dragging, the cursor stays a resize arrow and the editor doesn't select text */
+.app.resizing-side {
+    cursor: ew-resize;
+    user-select: none;
 }
 .pane {
     display: flex;
@@ -470,10 +517,9 @@ body {
     min-height: 0;
     background: var(--paper);
 }
-/* The web version's Install button (main.ts setUpInstall): pinned to the tab strip's top right, over
-   the end of the tabs, which leave it room. */
+/* The web version's Install button (main.ts setUpInstall): at the menu bar's right end. */
 .install-app {
-    position: absolute; top: 5px; right: 8px; z-index: 5; height: 25px;
+    margin-left: auto; height: 22px;
     display: flex; align-items: center; gap: 6px; padding: 0 12px;
     font: 600 12px var(--ui); color: var(--navy); background: var(--key);
     border: 0; border-radius: 999px; cursor: pointer;
@@ -482,7 +528,6 @@ body {
 .install-app:hover { filter: brightness(1.08); }
 .install-app span { font-size: 13px; line-height: 1; }
 .install-app[hidden] { display: none; }
-.workspace:has(> .install-app:not([hidden])) .tabs { padding-right: 104px; }
 .tabs {
     display: flex;
     height: 35px;
@@ -573,6 +618,7 @@ body {
 /* Status bar, across the whole window */
 .status {
     grid-column: 1 / -1;
+    grid-row: 3;
     display: flex;
     gap: 2px;
     align-items: center;
@@ -581,7 +627,7 @@ body {
         90deg,
         var(--wave-bot),
         var(--wave-mid) 60%,
-        #0284c7
+        var(--wave-end)
     );
     color: #fff;
     font-size: 12px;
@@ -937,6 +983,28 @@ body {
 .activity .badge[hidden] {
     display: none;
 }
+/* A workspace's folders, each a heading over its files in the Explorer (main.ts renderTree) */
+#tree .ws-folder {
+    font: 600 11px var(--ui);
+    padding-left: 6px;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    color: var(--muted);
+}
+#tree .ws-folder.active {
+    color: var(--ink);
+}
+#tree .ws-folder .ws-active {
+    margin-left: auto;
+    padding: 0 6px;
+    font-size: 10px;
+    letter-spacing: 0;
+    text-transform: none;
+    font-weight: 600;
+    color: var(--navy);
+    background: var(--key);
+    border-radius: 8px;
+}
 .scm-note {
     padding: 6px 14px;
 }
@@ -945,8 +1013,20 @@ body {
 .scm-init[hidden] {
     display: none;
 }
+/* Sized like the Explorer's find box: its own height, not the pane's */
 .scm-init {
-    margin: 4px 14px;
+    flex: none;
+    margin: 2px 10px 8px;
+    padding: 4px 8px;
+    font: 600 12px var(--ui);
+    color: var(--navy);
+    background: var(--key);
+    border: 1px solid var(--key);
+    border-radius: 2px;
+    cursor: pointer;
+}
+.scm-init:hover {
+    filter: brightness(1.12);
 }
 .scm-repo {
     display: flex;
@@ -973,8 +1053,7 @@ body {
     gap: 4px;
     padding: 0 10px 8px;
 }
-.scm-actions button,
-.scm-init {
+.scm-actions button {
     font: inherit;
     font-size: 12px;
     color: var(--ink);
@@ -984,8 +1063,7 @@ body {
     padding: 4px 8px;
     cursor: pointer;
 }
-.scm-actions .primary,
-.scm-init {
+.scm-actions .primary {
     flex: 1;
     color: var(--navy);
     background: var(--key);

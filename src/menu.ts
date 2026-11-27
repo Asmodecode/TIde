@@ -19,16 +19,23 @@ window.addEventListener("keydown", onShift, true);
 window.addEventListener("keyup", onShift, true);
 window.addEventListener("blur", () => { shiftHeld = false; });
 let restoreFocus: HTMLElement | null = null;
+let onClose: (() => void) | null = null;
 
 export function closeMenu() {
   open?.remove();
   open = null;
   restoreFocus?.focus({ preventScroll: true });
   restoreFocus = null;
+  const then = onClose;
+  onClose = null;
+  then?.();
 }
 
-/** Shows a menu at a point (client coordinates), kept inside the window. */
-export function showMenu(x: number, y: number, items: MenuItem[]) {
+/** Whether a menu is showing. */
+export const menuIsOpen = () => open !== null;
+
+/** Shows a menu at a point (client coordinates), kept inside the window. `closed` runs when it closes. */
+export function showMenu(x: number, y: number, items: MenuItem[], closed?: () => void) {
   closeMenu();
   shiftRows = [];
   const shown = items.filter((item, i, all) => item !== "-" || (i > 0 && all[i - 1] !== "-" && i < all.length - 1));
@@ -79,6 +86,7 @@ export function showMenu(x: number, y: number, items: MenuItem[]) {
   menu.style.left = `${Math.max(4, Math.min(x, window.innerWidth - width - 4))}px`;
   menu.style.top = `${Math.max(4, Math.min(y, window.innerHeight - height - 4))}px`;
   open = menu;
+  onClose = closed ?? null;
   for (const set of shiftRows) set(shiftHeld);
   menu.querySelector<HTMLButtonElement>("button:not(:disabled)")?.focus({ preventScroll: true });
 }

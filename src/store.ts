@@ -145,8 +145,8 @@ export interface Fs {
     onOutput: (text: string, err: boolean) => void,
     env?: Record<string, string>,
   ): ShellRun;
-  /** Watches a folder (and all in it) for changes, replacing the one watched before; null stops. */
-  watchFolder(path: string | null): Promise<void>;
+  /** Watches folders (and all in them) for changes, for this window, replacing what it watched before; [] stops. */
+  watchFolders(paths: string[]): Promise<void>;
   /** The user's home folder. */
   homeDir(): Promise<string>;
   createDir(path: string): Promise<void>;
@@ -338,7 +338,7 @@ export const fs: Fs = isTauri
           env: env ?? null,
         }),
       runShell,
-      watchFolder: (path) => invoke<void>("watch_folder", { path }),
+      watchFolders: (paths) => invoke<void>("watch_folder", { paths }),
       homeDir: () => import("@tauri-apps/api/path").then((p) => p.homeDir()),
       git: {
         status: (dir) => invoke<GitStatus>("git_status", { dir }),
@@ -389,7 +389,7 @@ export const fs: Fs = isTauri
         stop: async () => {},
       }),
       homeDir: async () => BROWSER,
-      watchFolder: async () => {},
+      watchFolders: async () => {},
       createDir: webFs.createDir,
       extensionsDir: webFs.extensionsDir,
       revealExtension: desktopOnly,

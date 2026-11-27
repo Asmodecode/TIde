@@ -7,6 +7,7 @@ import { FitAddon } from "@xterm/addon-fit";
 import { WebLinksAddon } from "@xterm/addon-web-links";
 import "@xterm/xterm/css/xterm.css";
 import { invoke } from "@tauri-apps/api/core";
+import { mix, token } from "./theme";
 
 /** TIde's navy, with the same ANSI colors as Output. */
 const DARK = {
@@ -24,7 +25,24 @@ const LIGHT = {
   brightBlack: "#6b7280", brightRed: "#ef4444", brightGreen: "#16a34a", brightYellow: "#ca8a04", brightBlue: "#0284c7",
   brightMagenta: "#8b5cf6", brightCyan: "#0d9488", brightWhite: "#1a2436",
 };
-const themeNow = () => (document.documentElement.dataset.theme === "light" ? LIGHT : DARK);
+/** The terminal's colors: TIde's own two themes have theirs; any other's come from its tokens (theme.ts). */
+const themeNow = () => {
+  const palette = document.documentElement.dataset.palette;
+  if (!palette || palette === "dark") return DARK;
+  if (palette === "light") return LIGHT;
+  const [paper, ink, key, scroll] = ["paper", "ink", "key", "scroll"].map(token);
+  const ansi = Array.from({ length: 16 }, (_, i) => token(`ansi-${i}`));
+  const light = document.documentElement.dataset.theme === "light";
+  return {
+    background: paper, foreground: ink, cursor: key, cursorAccent: paper,
+    selectionBackground: mix(paper, key, 0.32), scrollbarSliderBackground: `${scroll}80`, scrollbarSliderHoverBackground: scroll,
+    black: ansi[0], red: ansi[1], green: ansi[2], yellow: ansi[3], blue: ansi[4], magenta: ansi[5], cyan: ansi[6],
+    // On a light paper, white is the muted grey (as TIde Light has it), or it couldn't be seen.
+    white: light ? token("muted") : ansi[7],
+    brightBlack: ansi[8], brightRed: ansi[9], brightGreen: ansi[10], brightYellow: ansi[11], brightBlue: ansi[12],
+    brightMagenta: ansi[13], brightCyan: ansi[14], brightWhite: light ? ink : ansi[15],
+  };
+};
 
 /** Keys TIde keeps while the terminal has focus: Ctrl+` and Ctrl+Shift+U (the panel's own toggles). */
 const forTide = (e: KeyboardEvent) => (e.ctrlKey || e.metaKey) && (e.key === "`" || (e.shiftKey && e.key.toLowerCase() === "u"));
@@ -62,8 +80,8 @@ export function createTerminal(opts: {
   void document.fonts.load('13px "JetBrains Mono Variable"').then(() => {
     term.options.fontFamily = getComputedStyle(document.body).getPropertyValue("--mono") || "monospace";
   });
-  // Follows dark and light mode (theme.ts sets the attribute).
-  new MutationObserver(() => { term.options.theme = themeNow(); }).observe(document.documentElement, { attributes: true, attributeFilter: ["data-theme"] });
+  // Follows the theme (theme.ts sets these attributes).
+  new MutationObserver(() => { term.options.theme = themeNow(); }).observe(document.documentElement, { attributes: true, attributeFilter: ["data-theme", "data-palette"] });
   const fit = new FitAddon();
   term.loadAddon(fit);
   // Links open in your browser.
@@ -138,6 +156,11 @@ export function createTerminal(opts: {
     try { fit.fit(); } catch { /* not laid out yet */ }
   }
   new ResizeObserver(() => fitNow()).observe(el);
+  // A new code font from Settings (fonts.ts): measure the cells again and refit.
+  window.addEventListener("tide-fonts", () => {
+    term.options.fontFamily = getComputedStyle(document.body).getPropertyValue("--mono") || "monospace";
+    fitNow();
+  });
 
   return {
     el,

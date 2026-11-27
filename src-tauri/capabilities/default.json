@@ -1,8 +1,11 @@
 {
   "identifier": "default",
-  "windows": ["main"],
+  "windows": ["main", "tide-*"],
   "permissions": [
     "core:default",
+    "core:webview:allow-create-webview-window",
+    "core:window:allow-set-title",
+    "core:window:allow-set-focus",
     "opener:default",
     "dialog:default",
     "dialog:allow-open",

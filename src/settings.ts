@@ -2,6 +2,10 @@
 
 export interface Settings {
   fontSize: number;
+  /** TIde's font, for the window, the editor and the terminal: an id from fonts.ts's FONTS, or "file" for the font file you chose. */
+  font: string;
+  /** Joins characters such as -> and != into one glyph, in fonts that have them (Fira Code, JetBrains Mono). */
+  fontLigatures: boolean;
   tabSize: number;
   wordWrap: boolean;
   minimap: boolean;
@@ -24,14 +28,16 @@ export interface Settings {
   shiftDeletes: boolean;
   /** Saves changed files and programs a moment after you stop typing, and when TIde loses focus. */
   autoSave: boolean;
-  /** Dark, light, or whichever the system uses. */
-  theme: "dark" | "light" | "system";
+  /** A theme's id (theme.ts: TIde's own, or an extension's), or "system": TIde Dark or TIde Light, as the system is. */
+  theme: string;
   /** When an opened folder's tide.json lacks its calculator or language: ask, ask only when its files disagree, or never. */
   projectSetup: "always" | "conflicts" | "never";
 }
 
 const DEFAULTS: Settings = {
   fontSize: 13,
+  font: "default",
+  fontLigatures: false,
   tabSize: 4,
   wordWrap: false,
   minimap: false,
@@ -60,6 +66,16 @@ try {
   /* storage unavailable or bad JSON */
 }
 const listeners = new Set<(s: Settings) => void>();
+// Another TIde window (or browser tab) changed the settings: take them, so saving here keeps them.
+window.addEventListener("storage", (e) => {
+  if (e.key !== PREF) return;
+  try {
+    current = { ...DEFAULTS, ...JSON.parse(e.newValue ?? "{}") };
+  } catch {
+    return;
+  }
+  for (const fn of listeners) fn(settings());
+});
 
 let project: Partial<Settings> = {};
 /** The settings in use: yours, with the open project's tide.json "editor" values over them. */

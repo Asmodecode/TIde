@@ -72,7 +72,7 @@ for schema help.
 Contribute editor features
 --------------------------
 
-The ``contributes`` object supports four kinds of static contributions:
+The ``contributes`` object supports five kinds of static contributions:
 
 * **Snippets** have ``language``, ``prefix``, and ``body`` fields. ``body`` can be a string or an
   array of lines and uses Monaco snippet syntax: ``${1:name}`` creates an editable placeholder and
@@ -86,6 +86,8 @@ The ``contributes`` object supports four kinds of static contributions:
 * **Languages** register an ``id`` and can include ``name``, ``extensions``, ``filenames``,
   ``comments``, ``brackets``, and a ``monarch`` tokenizer. Tokenizer rules use
   `Monaco Monarch syntax <https://microsoft.github.io/monaco-editor/monarch.html>`_.
+* **Themes** have ``id``, ``name``, and ``base`` fields, plus optional ``colors`` and ``syntax``.
+  See :ref:`themes`.
 
 The ``language`` value is a Monaco language ID. TIde includes IDs such as ``tibasic``, ``c``,
 ``cpp``, ``ez80``, ``z80``, ``python``, ``tipython``, ``py2ez80``, ``lua``, and ``json``. When you
@@ -126,6 +128,111 @@ Here is a minimal language contribution for ``.foo`` files:
    }
 
 For working examples, inspect the built-in extension folders in the `TIde source <https://github.com/XSamuraiCoder/TIde/tree/main/extensions>`_.
+
+.. _themes:
+
+Add a theme
+-----------
+
+A theme recolors TIde: the window, the editor's syntax, and the terminal. It appears in
+**Settings → Theme** with your extension's name after it, and a project's ``tide.json`` can choose it
+with ``"editor": { "theme": "<id>" }``.
+
+.. code-block:: json
+
+   {
+     "name": "Sunset",
+     "contributes": {
+       "themes": [
+         {
+           "id": "sunset",
+           "name": "Sunset",
+           "base": "dark",
+           "colors": {
+             "navy": "#1a0f1f",
+             "panel": "#22142a",
+             "paper": "#2a1833",
+             "ink": "#f6e7f0",
+             "muted": "#b39ab8",
+             "rule": "#3e2649",
+             "key": "#ff9e64",
+             "key-wash": "#4a2a2a"
+           },
+           "syntax": {
+             "comment": "#9b84a3",
+             "string": "#c3e88d",
+             "keyword": "#ff9e64",
+             "function": "#7dcfff"
+           }
+         }
+       ]
+     }
+   }
+
+``id``
+   What the theme setting stores: letters, digits, ``.``, ``-`` and ``_``. It can't be one TIde's
+   themes already use (``dark``, ``light``, ``dark-modern``, ``light-modern``, ``monokai``,
+   ``high-contrast-dark``, ``high-contrast-light``, ``graphite``, ``lcd``) or another
+   extension's.
+
+``name``
+   What Settings shows.
+
+``base``
+   ``"dark"`` or ``"light"``. Everything the theme doesn't set comes from TIde Dark or TIde Light,
+   and TIde's light-mode details (such as the calculator panel's) follow a ``"light"`` base.
+
+``colors``
+   The window's colors, as ``#rrggbb``. Each is one of TIde's color tokens:
+
+   .. list-table::
+      :header-rows: 1
+      :widths: 30 70
+
+      * - Token
+        - Colors
+      * - ``navy``
+        - The activity bar.
+      * - ``panel``
+        - The side bar, tabs, and popups.
+      * - ``paper``
+        - The editor and pages, and the terminal's background.
+      * - ``body``
+        - What's under the pointer.
+      * - ``lcd``
+        - Code blocks and fields.
+      * - ``ink``
+        - Text.
+      * - ``muted``
+        - Quieter text: hints, line numbers.
+      * - ``rule``
+        - Lines and borders.
+      * - ``key``
+        - What you can press, the cursor, and links.
+      * - ``key-wash``
+        - The chosen item in a list.
+      * - ``warn``, ``danger``, ``ok``
+        - Warnings, errors, and success.
+      * - ``scroll``
+        - Scroll bars.
+      * - ``wave-top``, ``wave-mid``, ``wave-bot``, ``wave-end``
+        - TIde's waves: the status bar's gradient and the open view's mark.
+      * - ``ansi-0`` to ``ansi-15``
+        - The terminal's and Output's 16 colors.
+      * - ``git-m``, ``git-a``, ``git-r``, ``git-u``
+        - Source Control's modified, added, renamed, and untracked files.
+
+``syntax``
+   The editor's colors, as ``#rrggbb``: ``text``, ``comment``, ``string``, ``number``, ``operator``,
+   ``keyword``, ``io`` (TI-BASIC's input and output commands, and assembly directives), ``function``
+   (functions and built-in names), ``type`` (types, such as C's ``int``; the ``function`` color if
+   it isn't set), ``variable`` (variables and other names; the ``text`` color if it isn't set), and
+   ``delimiter``. Any role you leave out is your ``base`` theme's.
+
+A color that isn't ``#rrggbb`` or ``#rgb``, or a token TIde doesn't have, is left out. A theme TIde
+can't add at all (no ``id``, say) is left out too, and the Extensions view says why. Check that text
+reads on your ``paper``: aim for a contrast of 4.5:1 for text and code, and 3:1 for ``muted`` and
+comments.
 
 Add dynamic completions
 -----------------------
@@ -226,7 +333,7 @@ Extension API
 
 * ``tide.version`` is the running TIde version. ``tide.extension`` describes the extension with its
   ``id``, ``dir``, and ``manifest``. ``tide.monaco`` exposes Monaco for advanced editor features.
-* ``tide.commands.register(id, label, run, options?)`` adds a command to the File menu and editor
+* ``tide.commands.register(id, label, run, options?)`` adds a command to the Run menu and editor
   context menu. ``options`` can include a ``shortcut``, and ``when`` to show the command only in the
   projects it's for: ``{ project: true }`` while a folder is open, ``{ calculator: ["nspire"] }`` in a
   project for those calculators (``ce``, ``plus`` or ``nspire``), and ``{ language: ["c", "cpp"] }`` in
