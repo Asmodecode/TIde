@@ -91,7 +91,34 @@ export interface ExtensionCommand {
   shortcut?: string;
   extension: string;
   run: () => unknown;
+  when?: CommandWhen;
 }
+/** Which projects a command is for. With any of these, it shows only while a folder is open. */
+export interface CommandWhen {
+  /** True: only while a folder is open. */
+  project?: boolean;
+  /** Only in a project for one of these calculators: "ce", "plus" or "nspire". */
+  calculator?: string[];
+  /** Only in a project in one of these languages, as in tide.json. A project that doesn't say its language counts. */
+  language?: string[];
+}
+/** The open project, for deciding which commands show: null with no folder open. */
+export type CommandContext = { calculator: string; language?: string } | null;
+/** Whether a command shows for the open project (or for no project). */
+export function commandApplies(c: ExtensionCommand, at: CommandContext): boolean {
+  const w = c.when;
+  if (!w || (!w.project && !w.calculator && !w.language)) return true;
+  if (!at) return false;
+  if (w.calculator && !w.calculator.includes(at.calculator)) return false;
+  if (w.language && at.language && !w.language.includes(at.language)) return false;
+  return true;
+}
+const stringList = (v: unknown, name: string) => {
+  if (v === undefined) return undefined;
+  if (!Array.isArray(v) || !v.every((s) => typeof s === "string"))
+    throw new Error(`commands.register's when.${name} is a list of names, such as ["nspire"]`);
+  return v.map((s) => s.toLowerCase());
+};
 export type ExtensionEvent = "open" | "save" | "run" | "project" | "settings";
 
 /** What TIde gives the extension system. */
@@ -111,7 +138,7 @@ export interface ExtensionHost {
   run(line: string, dir?: string): Promise<{ ok: boolean; output: string }>;
   message(text: string): void;
   settings(): Readonly<Settings>;
-  project(): { root: string; name: string } | null;
+  project(): { root: string; name: string; calculator: string; language?: string } | null;
   openFile(path: string): Promise<void>;
   editor: {
     file(): { name: string; path: string | null; language: string } | null;
@@ -367,17 +394,23 @@ async function runMain(ext: Extension, undo: (() => void)[]) {
         id: string,
         label: string,
         run: () => unknown,
-        options: { shortcut?: string } = {},
+        options: { shortcut?: string; when?: CommandWhen } = {},
       ) {
         if (typeof run !== "function")
           throw new Error("commands.register needs a function to run");
         const key = `${ext.id}.${id}`;
+        const when = options.when;
         commands.set(key, {
           id: key,
           label: String(label),
           shortcut: options.shortcut,
           extension: ext.manifest.name,
           run,
+          when: when && {
+            project: !!when.project,
+            calculator: stringList(when.calculator, "calculator"),
+            language: stringList(when.language, "language"),
+          },
         });
         ext.added.push(`the "${label}" command`);
         changed();
@@ -993,8 +1026,20 @@ interface Tide {
   /** Add things here to undo them when the extension is turned off. Everything tide.* returns is added already. */
   readonly subscriptions: { push(...items: Disposable[]): void };
   readonly commands: {
-    /** Adds a command to the File menu and the editor's right-click menu. */
-    register(id: string, label: string, run: () => unknown, options?: { shortcut?: string }): Disposable;
+    /**
+     * Adds a command to the File menu and the editor's right-click menu. With when, it shows only
+     * in the projects it's for: { project: true } while a folder is open, { calculator: ["nspire"] }
+     * in a project for those calculators, { language: ["c", "cpp"] } in one in those languages.
+     */
+    register(
+      id: string,
+      label: string,
+      run: () => unknown,
+      options?: {
+        shortcut?: string;
+        when?: { project?: boolean; calculator?: ("ce" | "plus" | "nspire")[]; language?: string[] };
+      },
+    ): Disposable;
   };
   /** IntelliSense for any language: "tibasic", "c", "ez80" (assembly), "python", or one an extension adds. */
   readonly languages: {
@@ -1017,7 +1062,7 @@ interface Tide {
   /** The settings in use. */
   settings(): Readonly<Record<string, unknown>>;
   /** The open folder, if any. */
-  project(): { root: string; name: string } | null;
+  project(): { root: string; name: string; calculator: string; language?: string } | null;
   readonly editor: {
     /** The open file or program: its name, path (null for programs) and language. */
     file(): { name: string; path: string | null; language: string } | null;

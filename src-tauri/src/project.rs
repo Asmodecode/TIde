@@ -171,9 +171,8 @@ pub fn run_make(dir: String) -> Result<MakeResult, String> {
 }
 
 /// Runs a build or task command from a project's .tide/project.json. Async so it doesn't freeze the window.
-/// `env`, when given, is added to the command's environment. With NDLESS_HOME set, the Ndless SDK's
-/// toolchain folders (<NDLESS_HOME>/bin and <NDLESS_HOME>/ndless-sdk/bin, when they exist) are put on
-/// PATH too, so Ndless Makefiles find nspire-gcc, nspire-ld, genzehn and make-prg.
+/// `env`, when given, is added to the command's environment, with the toolchain folders it names on
+/// PATH (see shell::add_env): TIDE_PATH, the CE toolchain's (CEDEV) and the Ndless SDK's (NDLESS_HOME).
 #[tauri::command(async)]
 pub fn run_command(
     dir: String,

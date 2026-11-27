@@ -122,7 +122,7 @@ export interface Fs {
   pickFiles(label: string, extensions: string[]): Promise<string[]>;
   readBinary(path: string): Promise<Uint8Array>;
   /** The CE C libraries (clibs.8xg) from the project or the toolchain, if they are anywhere TIde looks. */
-  findClibs(projectRoot: string | null): Promise<string | null>;
+  findClibs(projectRoot: string | null, cedev?: string): Promise<string | null>;
   readDir(path: string): Promise<Entry[]>;
   readFile(path: string): Promise<string>;
   writeFile(path: string, contents: string): Promise<void>;
@@ -281,8 +281,8 @@ export const fs: Fs = isTauri
             ? [picked]
             : [];
       },
-      findClibs: (projectRoot) =>
-        invoke<string | null>("find_clibs", { projectRoot }),
+      findClibs: (projectRoot, cedev) =>
+        invoke<string | null>("find_clibs", { projectRoot, cedev: cedev || null }),
       readBinary: async (path) =>
         new Uint8Array(await invoke<ArrayBuffer>("read_binary_file", { path })),
       async pickSaveFile(

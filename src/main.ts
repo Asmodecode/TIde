@@ -20,6 +20,7 @@ import { ASM_CATALOG, ASM_LANG } from "./asm-support";
 import { getVersion as appVersion } from "@tauri-apps/api/app";
 import { createScm } from "./scm";
 import { showMenu, type MenuItem } from "./menu";
+import "./select-popup"; // TIde's own option list for every <select>
 import { SEND_TYPES, TREE_DRAG, createCalc, unbundle } from "./calc";
 import {
   ENCODINGS,
@@ -72,12 +73,14 @@ import { exportProgram } from "./export";
 import {
   EXTENSION_SCHEMA,
   EXTENSION_TYPES,
+  commandApplies,
   emit,
   extensionCommands,
   extensionsFolder,
   loadExtensions,
   reloadExtensions,
   type BundledExtension,
+  type CommandContext,
   type ExtensionHost,
   type ExtensionManifest,
 } from "./extensions";
@@ -987,6 +990,7 @@ async function runLine(
 ): Promise<{ ok: boolean; output: string }> {
   const cwd = dir ?? project?.root;
   if (!cwd) throw new Error("Open a folder to run a command in it.");
+  env ??= await toolchainEnv();
   panel.show("output");
   let text = "";
   let stop = () => {};
@@ -1085,12 +1089,35 @@ async function makefileIsNdless(): Promise<boolean> {
   return ndlessMakefile;
 }
 
-/** The environment for building a Nspire project: NDLESS_HOME, whose bin folders go on PATH (see run_command). */
-const nspireEnv = async () =>
-  (config.calculator === "nspire" || (!!project && getTarget() === "nspire") || (await makefileIsNdless())) &&
-  settings().ndlessHome.trim()
-    ? { NDLESS_HOME: settings().ndlessHome.trim() }
-    : undefined;
+const isWindows = navigator.userAgent.includes("Windows");
+/** A folder from Settings, with a leading ~ for your home folder, as a shell would. */
+async function expandHome(path: string): Promise<string> {
+  path = path.trim();
+  if (!/^~(?:[\\/]|$)/.test(path)) return path;
+  const home = await fs.homeDir().catch(() => "");
+  return home ? joinPath(home, path.slice(2)) : path;
+}
+/** Whether the open project builds for the Nspire: its tide.json, its target, or its Makefile's Ndless tools. */
+const nspireProject = async () =>
+  config.calculator === "nspire" || (!!project && getTarget() === "nspire") || (await makefileIsNdless());
+
+/**
+ * The toolchains from Settings, for every command TIde runs in the desktop app: the Ndless SDK
+ * (NDLESS_HOME) for a Nspire project, otherwise the CE toolchain (CEDEV), and the extra PATH folders.
+ * The app puts their bin folders first on PATH (shell.rs add_env).
+ */
+async function toolchainEnv(): Promise<Record<string, string> | undefined> {
+  if (fs.web) return undefined;
+  const s = settings(), env: Record<string, string> = {};
+  if (await nspireProject()) {
+    if (s.ndlessHome.trim()) env.NDLESS_HOME = await expandHome(s.ndlessHome);
+  } else if (s.cedevHome.trim()) env.CEDEV = await expandHome(s.cedevHome);
+  const extra = await Promise.all(pathList(s.toolchainPath).map(expandHome));
+  if (extra.length) env.TIDE_PATH = extra.join("\n");
+  return Object.keys(env).length ? env : undefined;
+}
+/** The folders in the "More folders on PATH" setting: separated by ; or new lines. */
+const pathList = (value: string) => value.split(/[;\n]/).map((p) => p.trim()).filter(Boolean);
 
 /** Packs a .lua/.py script into a .tns with Luna (Settings → TI-Nspire → Luna command). Resolves true when it succeeded. */
 async function packWithLuna(
@@ -1150,6 +1177,7 @@ async function loadConfig(exists = true) {
   calc.setLink(config.link);
   renderScripts();
   applyEditorMode();
+  refreshSettingsPage();
 }
 
 /** Whether the open project has .tide/tide.json. */
@@ -1383,7 +1411,19 @@ function settingRows(): Row[] {
       control: toggle("sendClibs"),
     },
     {
-      section: "TI-Nspire",
+      section: "Toolchains",
+      label: "CE toolchain folder",
+      description:
+        "CEDEV, the CE C/C++ toolchain's folder, for building CE C, C++, eZ80 and py2ez80 projects: make runs with it set and its bin folder (ez80-clang, convbin, and make on Windows) first on PATH, and Run finds clibs.8xg there. Empty if the toolchain is already on PATH.",
+      control: {
+        kind: "text",
+        get: () => s.cedevHome,
+        set: (v) => setSetting("cedevHome", v),
+        placeholder: isWindows ? "C:\\CEdev" : "~/CEdev",
+      },
+    },
+    {
+      section: "Toolchains",
       label: "Ndless SDK folder",
       description:
         "NDLESS_HOME for building Ndless C/C++ projects: make runs with it set, and its bin folders (nspire-gcc, nspire-ld, genzehn, make-prg) go on PATH. Empty if the toolchain is already on PATH.",
@@ -1395,7 +1435,7 @@ function settingRows(): Row[] {
       },
     },
     {
-      section: "TI-Nspire",
+      section: "Toolchains",
       label: "Luna command",
       description:
         "How to run Luna, which packs .lua and .py scripts into .tns documents. A path if it isn't on PATH.",
@@ -1404,6 +1444,18 @@ function settingRows(): Row[] {
         get: () => s.luna,
         set: (v) => setSetting("luna", v),
         placeholder: "luna",
+      },
+    },
+    {
+      section: "Toolchains",
+      label: "More folders on PATH",
+      description:
+        "Folders put first on PATH for this project's build, scripts, prerun and postrun steps, such as where spasm-ng, Python or SDCC is. Separate them with ;.",
+      control: {
+        kind: "text",
+        get: () => s.toolchainPath,
+        set: (v) => setSetting("toolchainPath", pathList(v).join("; ")),
+        placeholder: isWindows ? "C:\\tools\\bin; D:\\sdcc\\bin" : "~/.local/bin; /opt/sdcc/bin",
       },
     },
     {
@@ -1524,10 +1576,72 @@ function settingRows(): Row[] {
   }
   // The web version leaves out what only the desktop app does: updates (see updater above), source
   // control, the TI-Nspire's command-line tools, and the Recycle Bin (a browser deletes for good).
-  const desktopOnly = new Set(["Updates", "Source control", "TI-Nspire"]);
-  return fs.web
+  const desktopOnly = new Set(["Updates", "Source control", "Toolchains"]);
+  const available = fs.web
     ? rows.filter((r) => !desktopOnly.has(r.section) && r.label !== "Shift for permanent delete")
     : rows;
+  // Settings for a kind of project show only while one is open, and only those that fit it, until
+  // you ask for all of them. With no folder open, none of them show.
+  const fits = projectFits();
+  if (!fits) return available.filter((r) => !PROJECT_ONLY(r));
+  const shown = showAllSettings ? available : available.filter(fits.applies);
+  const hidden = available.length - shown.length;
+  if (!hidden && !showAllSettings) return shown;
+  shown.splice(shown.findIndex((r) => r.section === "Project"), 0, {
+    section: "Project",
+    label: showAllSettings ? "Showing every setting" : `Showing settings for ${fits.kind}`,
+    description: showAllSettings
+      ? `Including those that don't apply to ${project!.name}.`
+      : `${hidden} setting${hidden === 1 ? " doesn't" : "s don't"} apply to ${project!.name} and ${hidden === 1 ? "is" : "are"} hidden.`,
+    control: {
+      kind: "button",
+      label: showAllSettings ? "Only this project's" : "Show all",
+      run: () => {
+        showAllSettings = !showAllSettings;
+        refreshSettingsPage();
+      },
+    },
+  });
+  return shown;
+}
+
+let showAllSettings = false;
+const LANGUAGE_NAMES: Record<ProjectLanguage, string> = {
+  tibasic: "TI-BASIC", c: "C", cpp: "C++", ez80: "eZ80 assembly", z80: "z80 assembly",
+  tipython: "TI-Python", py2ez80: "py2ez80", lua: "Lua",
+};
+/** Settings that are about a project, so they show only while a folder is open. */
+const PROJECT_ONLY = (r: Row) =>
+  r.section === "Toolchains" ||
+  r.label === "Send clibs.8xg with C projects" ||
+  r.label === "Calculator and language" ||
+  r.label === CONFIG_FILE;
+/** Which settings apply to the open project, from its tide.json calculator and language. Null with no folder open. */
+function projectFits(): { kind: string; applies: (r: Row) => boolean } | null {
+  if (!project) return null;
+  const calculator: Target = isTarget(config.calculator) ? config.calculator : getTarget();
+  const language = config.language; // unknown: don't leave anything out for it
+  const is = (...languages: ProjectLanguage[]) => !language || languages.includes(language);
+  const nspire = calculator === "nspire" || language === "lua";
+  const ce = calculator === "ce" && !nspire;
+  const fit: Record<string, () => boolean> = {
+    "CE toolchain folder": () => ce && is("c", "cpp", "ez80", "py2ez80"),
+    "Send clibs.8xg with C projects": () => ce && is("c", "cpp", "py2ez80"),
+    "Ndless SDK folder": () => nspire && is("c", "cpp"),
+    "Luna command": () => nspire && is("lua", "tipython"),
+  };
+  return {
+    kind: `${language ? `${LANGUAGE_NAMES[language]} on the ` : "the "}${TARGETS[calculator].name}`,
+    applies: (r) => {
+      if (r.section === "TI-BASIC") return is("tibasic");
+      return fit[r.label]?.() ?? true;
+    },
+  };
+}
+/** Rebuilds the Settings page if it's open, after the project or what it shows changes. */
+function refreshSettingsPage() {
+  const page = views.get("settings")?.el;
+  page?.dispatchEvent(new Event("settings-refresh"));
 }
 
 function setGutter(numbers: boolean) {
@@ -1697,11 +1811,9 @@ async function buildProject(): Promise<boolean> {
   setMessage(`Building ${name}…`);
   try {
     const line = config.build ?? "make";
-    const env = await nspireEnv();
-    const { ok, output } =
-      fs.web && !env
-        ? await buildInBrowser(line)
-        : await runLine("Build", line, undefined, env);
+    const { ok, output } = fs.web
+      ? await buildInBrowser(line)
+      : await runLine("Build", line);
     const lines = output
       .split(/\r?\n/)
       .map((l) => l.trim())
@@ -1844,7 +1956,7 @@ async function buildForRun(): Promise<ForRun | null> {
       if (Array.isArray(config.libraries))
         libPaths = config.libraries.map((p) => joinPath(root, p));
       else if (config.libraries ?? settings().sendClibs) {
-        const clibs = await fs.findClibs(root).catch(() => null);
+        const clibs = await fs.findClibs(root, await expandHome(settings().cedevHome)).catch(() => null);
         if (clibs) libPaths = [clibs];
       }
     }
@@ -4128,8 +4240,16 @@ function editorMenu(position: monaco.IPosition | null): MenuItem[] {
 }
 
 /** Menu items for the commands extensions added. One that fails says so in the status bar. */
+/** The open project's calculator and language, for which extension commands show. Null with no folder open. */
+function commandContext(): CommandContext {
+  if (!project) return null;
+  const calculator: Target = isTarget(config.calculator) ? config.calculator : getTarget();
+  return { calculator, ...(config.language ? { language: config.language } : {}) };
+}
+/** Extension commands for the menus: those for the open project, or with no folder open, those for no project. */
 function extensionItems(): MenuItem[] {
-  return extensionCommands().map((c) => ({
+  const at = commandContext();
+  return extensionCommands().filter((c) => commandApplies(c, at)).map((c) => ({
     label: c.label,
     shortcut: c.shortcut,
     run: () => {
@@ -4411,6 +4531,7 @@ onSettingsChange((s) => {
 });
 onTargetChange(() => {
   applyEditorMode();
+  refreshSettingsPage();
   refresh();
   void checkPrograms();
   setMessage(`Target: ${TARGETS[getTarget()].name}`);
@@ -4599,10 +4720,13 @@ const extensionHost: ExtensionHost = {
   readBinary: (path) => fs.readBinary(path),
   writeBinary: (path, bytes) => fs.writeBinary(path, bytes),
   remove: (path) => fs.deletePath(path, false),
-  run: async (line, dir) => runLine("Extension", line, dir, await nspireEnv()),
+  run: async (line, dir) => runLine("Extension", line, dir),
   message: setMessage,
   settings,
-  project: () => project && { root: project.root, name: project.name },
+  project: () => {
+    const at = commandContext();
+    return project && at && { root: project.root, name: project.name, ...at };
+  },
   openFile: openPath,
   editor: {
     file: () => {

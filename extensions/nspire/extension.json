@@ -1,7 +1,7 @@
 {
   "name": "Nspire",
   "id": "tide.nspire",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "author": "TIde",
   "description": "TI-Nspire CX support: completions and hover help for Nspire Lua and the Ndless SDK's C/C++ API, and commands to scaffold a Ndless project in the open folder, build it with make, pack .lua/.py scripts into .tns with Luna, and send files to the calculator panel's Nspire.",
   "main": "main.js",

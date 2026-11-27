@@ -90,25 +90,43 @@ fn pump(app: AppHandle, id: u32, mut from: impl Read + Send + 'static, err: bool
     })
 }
 
-/// Adds `env` to a command's environment. With NDLESS_HOME in it (and no PATH of its own), the Ndless
-/// SDK's toolchain folders, <NDLESS_HOME>/bin and <NDLESS_HOME>/ndless-sdk/bin where they exist, go
-/// first on PATH, so Ndless makefiles find nspire-gcc, nspire-ld, genzehn and make-prg.
+/// Adds `env` to a command's environment, with the toolchain folders TIde's settings name first on
+/// PATH (unless `env` has a PATH of its own):
+/// - TIDE_PATH: extra folders, one per line. It's TIde's own, so the command doesn't get it.
+/// - CEDEV: the CE toolchain; its bin folder (ez80-clang, convbin, and make on Windows).
+/// - NDLESS_HOME: the Ndless SDK; <NDLESS_HOME>/bin and <NDLESS_HOME>/ndless-sdk/bin, so Ndless
+///   makefiles find nspire-gcc, nspire-ld, genzehn and make-prg.
+/// Only folders that exist go on PATH.
 pub(crate) fn add_env(cmd: &mut Command, env: Option<HashMap<String, String>>) {
-    let Some(env) = env else { return };
-    if let (Some(home), false) = (env.get("NDLESS_HOME"), env.contains_key("PATH")) {
-        let sep = if cfg!(windows) { ";" } else { ":" };
-        let mut bins: Vec<String> = ["bin", "ndless-sdk/bin"]
-            .iter()
-            .map(|sub| std::path::Path::new(home).join(sub))
-            .filter(|p| p.is_dir())
-            .map(|p| p.to_string_lossy().into_owned())
-            .collect();
-        if let (false, Ok(path)) = (bins.is_empty(), std::env::var("PATH")) {
-            bins.push(path);
-            cmd.env("PATH", bins.join(sep));
+    let Some(mut env) = env else { return };
+    let extra = env.remove("TIDE_PATH");
+    if !env.contains_key("PATH") {
+        let bins = toolchain_bins(extra.as_deref(), env.get("CEDEV").map(String::as_str), env.get("NDLESS_HOME").map(String::as_str));
+        if let (false, Some(path)) = (bins.is_empty(), std::env::var_os("PATH")) {
+            let all = bins.into_iter().chain(std::env::split_paths(&path));
+            if let Ok(joined) = std::env::join_paths(all) {
+                cmd.env("PATH", joined);
+            }
         }
     }
     cmd.envs(env);
+}
+
+/// The folders `add_env` puts first on PATH, in order: TIDE_PATH's, then the CE toolchain's, then the Ndless SDK's.
+fn toolchain_bins(extra: Option<&str>, cedev: Option<&str>, ndless: Option<&str>) -> Vec<std::path::PathBuf> {
+    use std::path::{Path, PathBuf};
+    let mut dirs: Vec<PathBuf> = extra
+        .map(|list| list.lines().map(str::trim).filter(|l| !l.is_empty()).map(PathBuf::from).collect())
+        .unwrap_or_default();
+    if let Some(home) = cedev.filter(|h| !h.trim().is_empty()) {
+        dirs.push(Path::new(home.trim()).join("bin"));
+    }
+    if let Some(home) = ndless.filter(|h| !h.trim().is_empty()) {
+        dirs.extend(["bin", "ndless-sdk/bin"].iter().map(|sub| Path::new(home.trim()).join(sub)));
+    }
+    dirs.retain(|p| p.is_dir());
+    dirs.dedup();
+    dirs
 }
 
 /// Starts `line` in the shell, in `dir`, with `env` added to its environment. Output and the exit
@@ -219,5 +237,21 @@ mod tests {
         let text = String::from_utf8_lossy(&out.stdout);
         assert!(out.status.success());
         assert!(text.contains("one") && text.contains("two"), "{text}");
+    }
+
+    #[test]
+    fn toolchain_bins_keeps_folders_that_exist_in_order() {
+        let base = std::env::temp_dir().join(format!("tide-bins-{}", std::process::id()));
+        let extra = base.join("extra");
+        let cedev = base.join("CEdev");
+        let ndless = base.join("ndless");
+        for dir in [extra.clone(), cedev.join("bin"), ndless.join("ndless-sdk/bin")] {
+            std::fs::create_dir_all(dir).unwrap();
+        }
+        let list = format!("{}\n{}\n", extra.display(), base.join("missing").display());
+        let bins = toolchain_bins(Some(&list), cedev.to_str(), ndless.to_str());
+        assert_eq!(bins, vec![extra, cedev.join("bin"), ndless.join("ndless-sdk/bin")]);
+        assert!(toolchain_bins(None, Some("  "), None).is_empty());
+        std::fs::remove_dir_all(base).unwrap();
     }
 }

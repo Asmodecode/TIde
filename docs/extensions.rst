@@ -227,14 +227,19 @@ Extension API
 * ``tide.version`` is the running TIde version. ``tide.extension`` describes the extension with its
   ``id``, ``dir``, and ``manifest``. ``tide.monaco`` exposes Monaco for advanced editor features.
 * ``tide.commands.register(id, label, run, options?)`` adds a command to the File menu and editor
-  context menu. ``options`` can include a ``shortcut``.
+  context menu. ``options`` can include a ``shortcut``, and ``when`` to show the command only in the
+  projects it's for: ``{ project: true }`` while a folder is open, ``{ calculator: ["nspire"] }`` in a
+  project for those calculators (``ce``, ``plus`` or ``nspire``), and ``{ language: ["c", "cpp"] }`` in
+  one in those languages (a project whose tide.json doesn't name its language counts). A command with
+  ``when`` doesn't show with no folder open.
 * ``tide.on(event, callback)`` listens for ``open``, ``save``, ``run``, ``project``, or ``settings``
   events. Event details are:
 
   * ``open`` and ``save``: ``{name, path, language}``; ``path`` is ``null`` for unsaved or
     browser-stored files.
   * ``run``: ``{programs, launch}`` after a program runs in TIde's emulator.
-  * ``project``: ``{root, name}`` when a project folder opens.
+  * ``project``: ``{root, name}`` when a project folder opens. ``tide.project()`` also has its
+    ``calculator`` and, when tide.json names it, its ``language``.
   * ``settings``: the settings object after settings change.
 
   Keep handlers quick; perform slow work asynchronously so the editor remains responsive.

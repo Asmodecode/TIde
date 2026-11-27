@@ -2727,3 +2727,294 @@ body {
 .context-view {
     font-family: var(--ui);
 }
+
+/* ── Form controls: one look for every text box, search box, number box, textarea and dropdown ──
+   Each place keeps its own size, padding and font; this sets the colors, corners, arrow and
+   states, and comes last so it wins. Without appearance: none, WebKitGTK draws the system's
+   grey widgets, which ignore TIde's theme. */
+:root {
+    --field: var(--paper);
+    --field-hover: color-mix(in srgb, var(--key) 45%, var(--rule));
+    --field-ring: color-mix(in srgb, var(--key) 28%, transparent);
+    --field-radius: 4px;
+    --chevron: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 10 6'%3E%3Cpath d='M1 1l4 4 4-4' fill='none' stroke='%238b9cbb' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+    --search-clear: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 10 10'%3E%3Cpath d='M2 2l6 6M8 2l-6 6' fill='none' stroke='%238b9cbb' stroke-width='1.5' stroke-linecap='round'/%3E%3C/svg%3E");
+}
+:root[data-theme="light"] {
+    --chevron: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 10 6'%3E%3Cpath d='M1 1l4 4 4-4' fill='none' stroke='%235a6883' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+    --search-clear: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 10 10'%3E%3Cpath d='M2 2l6 6M8 2l-6 6' fill='none' stroke='%235a6883' stroke-width='1.5' stroke-linecap='round'/%3E%3C/svg%3E");
+}
+/* Pages that sit on the editor's paper get fields a step darker, so they stand out from it. */
+.file-view,
+.settings-page,
+.serial-view,
+.update-dialog {
+    --field: var(--panel);
+}
+:root[data-theme="light"] .file-view,
+:root[data-theme="light"] .settings-page,
+:root[data-theme="light"] .serial-view,
+:root[data-theme="light"] .update-dialog {
+    --field: var(--paper);
+}
+
+/* Text, search and number boxes, and the commit message */
+#find,
+#doc-find,
+#ext-find,
+#scm-message,
+#pane-ext .name-input,
+.docs-tools input,
+.settings-page input[type="number"],
+.settings-page input[type="search"],
+.settings-page .settings-text,
+.setup-step input {
+    appearance: none;
+    -webkit-appearance: none;
+    color: var(--ink);
+    background-color: var(--field);
+    border: 1px solid var(--rule);
+    border-radius: var(--field-radius);
+    outline: none;
+    transition: border-color 0.12s;
+}
+#pane-ext .name-input {
+    padding: 5px 8px;
+    font: 13px var(--ui);
+}
+#find,
+#doc-find,
+#ext-find {
+    padding: 5px 8px;
+}
+#find:hover,
+#doc-find:hover,
+#ext-find:hover,
+#scm-message:hover,
+#pane-ext .name-input:hover,
+.docs-tools input:hover,
+.settings-page input[type="number"]:hover,
+.settings-page input[type="search"]:hover,
+.settings-page .settings-text:hover,
+.setup-step input:hover {
+    border-color: var(--field-hover);
+}
+#find:focus,
+#doc-find:focus,
+#ext-find:focus,
+#scm-message:focus,
+#pane-ext .name-input:focus,
+.docs-tools input:focus,
+.settings-page input[type="number"]:focus,
+.settings-page input[type="search"]:focus,
+.settings-page .settings-text:focus,
+.setup-step input:focus {
+    border-color: var(--key);
+    box-shadow: 0 0 0 3px var(--field-ring);
+}
+#ext-find::placeholder,
+#pane-ext .name-input::placeholder,
+.docs-tools input::placeholder,
+.settings-page input::placeholder,
+.setup-step input::placeholder {
+    color: var(--muted);
+    opacity: 1;
+}
+.settings-page .settings-text {
+    width: 240px;
+}
+/* The tree's new-file box is always focused: a ring like the others, inside its row. */
+#tree .name-input {
+    border-radius: 3px;
+    box-shadow: 0 0 0 2px var(--field-ring);
+}
+#tree li.invalid .name-input {
+    box-shadow: 0 0 0 2px color-mix(in srgb, var(--danger) 28%, transparent);
+}
+/* Search boxes: TIde's own clear button, not the system's. */
+input[type="search"]::-webkit-search-cancel-button {
+    -webkit-appearance: none;
+    appearance: none;
+    width: 10px;
+    height: 10px;
+    margin-left: 6px;
+    background: var(--search-clear) center / 10px 10px no-repeat;
+    cursor: pointer;
+    opacity: 0.8;
+}
+input[type="search"]::-webkit-search-cancel-button:hover {
+    opacity: 1;
+}
+/* Number boxes: keep the arrows, quieter until hovered. */
+.settings-page input[type="number"] {
+    appearance: textfield;
+    -webkit-appearance: textfield;
+}
+.settings-page input[type="number"]::-webkit-inner-spin-button {
+    opacity: 0.5;
+}
+.settings-page input[type="number"]:hover::-webkit-inner-spin-button {
+    opacity: 1;
+}
+
+/* Dropdowns with a box: the calculator model menu's arrow everywhere */
+#calc-model,
+.file-view select,
+.settings-page select,
+.docs-tools select,
+.serial-view select,
+.connection-model select,
+.setup-step select {
+    appearance: none;
+    -webkit-appearance: none;
+    color: var(--ink);
+    background-color: var(--field);
+    background-image: var(--chevron);
+    background-repeat: no-repeat;
+    background-position: right 9px center;
+    background-size: 10px 6px;
+    border: 1px solid var(--rule);
+    border-radius: var(--field-radius);
+    padding-right: 28px;
+    line-height: 1.3;
+    cursor: pointer;
+    text-overflow: ellipsis;
+    outline: none;
+    transition: border-color 0.12s;
+}
+#calc-model:hover,
+.file-view select:hover,
+.settings-page select:hover,
+.docs-tools select:hover,
+.serial-view select:hover,
+.connection-model select:hover,
+.setup-step select:hover {
+    border-color: var(--field-hover);
+}
+#calc-model:focus-visible,
+.file-view select:focus-visible,
+.settings-page select:focus-visible,
+.docs-tools select:focus-visible,
+.serial-view select:focus-visible,
+.connection-model select:focus-visible,
+.setup-step select:focus {
+    border-color: var(--key);
+    box-shadow: 0 0 0 3px var(--field-ring);
+}
+select:disabled,
+input:disabled,
+textarea:disabled {
+    opacity: 0.5;
+    cursor: default;
+}
+/* The status bar's menus stay flat on the wave gradient, with a small arrow of their own. */
+.status select {
+    padding-right: 16px;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 10 6'%3E%3Cpath d='M1 1l4 4 4-4' fill='none' stroke='%23ffffff' stroke-opacity='.75' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+    background-repeat: no-repeat;
+    background-position: right 5px center;
+    background-size: 8px 5px;
+    border-radius: 3px;
+}
+.status select:focus-visible {
+    outline: 1px solid rgba(255, 255, 255, 0.7);
+    outline-offset: -1px;
+}
+
+/* A dropdown's options (select-popup.ts): TIde's own list in place of the system's, styled like the
+   right-click menus. The colors on option are for the moment before it opens and for any list the
+   system still draws. */
+select option,
+select optgroup {
+    color: var(--ink);
+    background-color: var(--panel);
+}
+select:is([aria-expanded="true"]) {
+    border-color: var(--key);
+}
+.select-popup {
+    position: fixed;
+    z-index: 200;
+    box-sizing: border-box;
+    max-width: min(420px, calc(100vw - 8px));
+    padding: 4px;
+    overflow-y: auto;
+    color: var(--ink);
+    background: var(--panel);
+    border: 1px solid var(--rule);
+    border-radius: 6px;
+    box-shadow: 0 10px 28px rgba(0, 0, 0, 0.45);
+    font: 12.5px var(--ui);
+    user-select: none;
+}
+:root[data-theme="light"] .select-popup {
+    background: var(--paper);
+    box-shadow: 0 10px 28px rgba(26, 36, 54, 0.18);
+}
+.select-option {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 5px 12px 5px 8px;
+    border-radius: 4px;
+    white-space: nowrap;
+    cursor: pointer;
+}
+.select-option span {
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+.select-option .check {
+    flex: 0 0 12px;
+    font-style: normal;
+    font-size: 11px;
+    text-align: center;
+    color: var(--key);
+}
+.select-option.grouped {
+    padding-left: 14px;
+}
+.select-option.active {
+    background: var(--key-wash);
+}
+.select-option[aria-selected="true"] {
+    color: var(--key);
+    font-weight: 600;
+}
+.select-option[aria-disabled="true"] {
+    color: var(--muted);
+    opacity: 0.55;
+    cursor: default;
+}
+.select-group {
+    padding: 8px 8px 3px;
+    font: 700 10.5px var(--ui);
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    color: var(--muted);
+}
+.select-group:first-child {
+    padding-top: 4px;
+}
+
+.image-info {
+    font-family: var(--mono);
+    font-size: 12px;
+    white-space: nowrap;
+}
+.setup-choice.detected:not([aria-pressed="true"]) {
+    border-color: color-mix(in srgb, var(--ok) 45%, var(--rule));
+}
+.setup-step-kind.kind-key-press,
+.setup-step-kind.kind-key-type {
+    color: var(--git-m);
+    background: color-mix(in srgb, var(--git-m) 14%, transparent);
+}
+.setup-step-kind.kind-program-run,
+.setup-step-kind.kind-program-open,
+.setup-step-kind.kind-app-open {
+    color: var(--ok);
+    background: color-mix(in srgb, var(--ok) 14%, transparent);
+}

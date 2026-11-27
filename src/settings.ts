@@ -9,8 +9,12 @@ export interface Settings {
   showRuler: boolean;
   fallbackEncoding: string;
   sendClibs: boolean;
+  /** CEDEV, the CE toolchain's folder, for building CE C, C++ and eZ80 projects; its bin goes on PATH. */
+  cedevHome: string;
   /** NDLESS_HOME for building Ndless (TI-Nspire) projects; its bin folders are put on PATH for make. */
   ndlessHome: string;
+  /** More folders put first on PATH for builds, scripts and steps, one per line. */
+  toolchainPath: string;
   /** How to run Luna (packs .lua/.py into .tns); a path if it isn't on PATH. */
   luna: string;
   checkUpdates: boolean;
@@ -35,7 +39,9 @@ const DEFAULTS: Settings = {
   showRuler: true,
   fallbackEncoding: "windows-1252",
   sendClibs: true,
+  cedevHome: "",
   ndlessHome: "",
+  toolchainPath: "",
   luna: "luna",
   checkUpdates: true,
   updateChannel: "stable",
@@ -242,6 +248,7 @@ export function settingsPage(rows: () => Row[]): HTMLElement {
     el("div", { className: "settings-head" }, el("h1", {}, "Settings"), search),
     list,
   );
+  page.addEventListener("settings-refresh", render);
   // Refresh values when the page is shown again (they may have changed from the status bar).
   new IntersectionObserver((entries) => {
     if (entries.some((e) => e.isIntersecting)) render();

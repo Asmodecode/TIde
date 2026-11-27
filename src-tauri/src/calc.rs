@@ -331,16 +331,19 @@ pub fn calc_read_program(path: String) -> Result<tauri::ipc::Response, String> {
 }
 
 /// Finds the CE C libraries (clibs.8xg, a separate download from the CE toolchain's releases).
-/// Looks in the project (its root, bin/ and lib/), then $CEDEV and the default toolchain folder.
+/// Looks in the project (its root, bin/ and lib/), then `cedev` (the CE toolchain folder in Settings),
+/// $CEDEV and the default toolchain folder.
 #[tauri::command]
-pub fn find_clibs(project_root: Option<String>) -> Option<String> {
+pub fn find_clibs(project_root: Option<String>, cedev: Option<String>) -> Option<String> {
     let mut dirs: Vec<PathBuf> = Vec::new();
     if let Some(root) = project_root.map(PathBuf::from) {
         dirs.extend([root.clone(), root.join("bin"), root.join("lib")]);
     }
-    let mut toolchains: Vec<PathBuf> = std::env::var_os("CEDEV")
-        .map(PathBuf::from)
+    let mut toolchains: Vec<PathBuf> = cedev
+        .filter(|c| !c.trim().is_empty())
+        .map(|c| PathBuf::from(c.trim()))
         .into_iter()
+        .chain(std::env::var_os("CEDEV").map(PathBuf::from))
         .collect();
     if cfg!(windows) {
         toolchains.push(PathBuf::from(r"C:\CEdev"));
@@ -441,7 +444,7 @@ mod tests {
         let root = std::env::temp_dir().join(format!("tide-clibs-{}", std::process::id()));
         fs::create_dir_all(root.join("bin")).unwrap();
         fs::write(root.join("bin").join("CLIBS.8xg"), b"x").unwrap();
-        let found = find_clibs(Some(root.to_string_lossy().into_owned()));
+        let found = find_clibs(Some(root.to_string_lossy().into_owned()), None);
         fs::remove_dir_all(&root).unwrap();
         assert!(found.is_some_and(|p| p.ends_with("CLIBS.8xg")));
     }

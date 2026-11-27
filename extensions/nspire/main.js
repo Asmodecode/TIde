@@ -42,13 +42,16 @@ export function activate(tide) {
     return true;
   }
 
+  // Only in a project for the TI-Nspire CX: other projects, and no folder at all, don't show them.
+  const nspireOnly = { when: { calculator: ["nspire"] } };
+
   // One-click build: make in the open folder (the Ndless SDK folder setting puts the SDK's bin on PATH).
   tide.commands.register("build", "Nspire: Build project (make)", async () => {
     const project = tide.project();
     if (!project) return tide.message("Open a folder with a Ndless Makefile first.");
     const r = await tide.run("make");
     tide.message(r.ok ? `Built ${project.name}` : "Build failed: see the Output tab");
-  });
+  }, nspireOnly);
 
   // Pack the active .lua/.py into a .tns with Luna, next to the script, and send it to the Nspire.
   tide.commands.register("pack", "Nspire: Pack with Luna and send", async () => {
@@ -62,7 +65,7 @@ export function activate(tide) {
     if (!r.ok) return tide.message("Luna failed: see the Output tab");
     const bytes = await tide.files.readBinary(f.path.slice(0, f.path.length - name.length) + out);
     if (await sendToCalc([{ name: out, bytes }])) tide.message(`Sent ${out} to the TI-Nspire CX`);
-  });
+  }, nspireOnly);
 
   // Send the active .tns document to the calculator.
   tide.commands.register("send", "Nspire: Send file to the calculator", async () => {
@@ -71,7 +74,7 @@ export function activate(tide) {
     const bytes = await tide.files.readBinary(f.path);
     if (await sendToCalc([{ name: baseName(f.path), bytes }]))
       tide.message(`Sent ${baseName(f.path)} to the TI-Nspire CX`);
-  });
+  }, nspireOnly);
 
   // Scaffold a Ndless project in the open folder: Makefile and main.c from the SDK's own templates,
   // plus a .tide/tide.json that marks the project for the Nspire. Nothing is overwritten.
@@ -101,7 +104,7 @@ export function activate(tide) {
     } catch (err) {
       tide.message(`Could not create the project files: ${err}`);
     }
-  });
+  }, nspireOnly);
 }
 
 export function deactivate() {}
