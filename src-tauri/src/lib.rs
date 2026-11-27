@@ -3,6 +3,8 @@ use std::path::PathBuf;
 use std::sync::Mutex;
 use tauri::Manager;
 
+#[cfg(target_os = "linux")]
+mod desktop_entry;
 mod calc;
 mod link;
 mod emulator;
@@ -136,6 +138,9 @@ pub fn run() {
     // finds the window's icon by a .desktop file of that exact name. The bundles install TIde.desktop.
     #[cfg(target_os = "linux")]
     glib::set_prgname(Some("TIde"));
+    // ...and builds that don't install TIde.desktop (the .tar.gz, an AppImage, tauri dev) write their own.
+    #[cfg(target_os = "linux")]
+    desktop_entry::ensure();
 
     tauri::Builder::default()
         // Windows and Linux pass a double-clicked file on the command line; macOS sends RunEvent::Opened.
